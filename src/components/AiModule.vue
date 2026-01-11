@@ -12,7 +12,62 @@
         placeholder="请输入API Key"
         @blur="saveApiKey"
       />
-      <button @click="testApiKey">测试连接</button>
+      <button 
+        @click="testApiKey"
+        :disabled="isTestingApiKey"
+        class="test-button"
+      >
+        {{ isTestingApiKey ? '测试中...' : '测试连接' }}
+      </button>
+      
+      <!-- API Key测试结果 -->
+      <div 
+        class="api-key-test-result"
+        v-if="apiKeyTestResult"
+      >
+        <div 
+          class="test-result-content"
+          :class="apiKeyTestResult.success ? 'success' : 'error'"
+        >
+          <span class="test-result-icon">
+            {{ apiKeyTestResult.success ? '✓' : '✗' }}
+          </span>
+          <span class="test-result-message">
+            {{ apiKeyTestResult.message }}
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 预览图片选择 -->
+    <div class="preview-selection">
+      <label>选择预览图片（可多选）:</label>
+      <div class="preview-checkbox-list">
+        <div 
+          class="preview-checkbox-item"
+          v-for="record in previewRecords" 
+          :key="record.id"
+        >
+          <input 
+            type="checkbox"
+            :id="`preview-${record.id}`"
+            :value="record.id"
+            v-model="selectedPreviewIds"
+            @change="handlePreviewSelectionChange"
+          />
+          <label :for="`preview-${record.id}`" class="preview-checkbox-label">
+            <span class="preview-checkbox-title">
+              图{{ previewRecords.indexOf(record) + 1 }}
+            </span>
+            <span class="preview-checkbox-time">
+              {{ record.timestamp.toLocaleString() }}
+            </span>
+          </label>
+        </div>
+        <div class="no-previews" v-if="previewRecords.length === 0">
+          暂无预览图片，请先在图片拼图页面生成预览
+        </div>
+      </div>
     </div>
     
     <!-- 提示词输入 -->
@@ -56,16 +111,28 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, defineEmits } from 'vue';
+import { defineProps, defineEmits, ref, computed, withDefaults } from 'vue';
+
+// 预览记录接口
+interface PreviewRecord {
+  id: string;
+  dataURL: string;
+  timestamp: Date;
+}
 
 // 组件属性
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   apiKey: string;
   prompt: string;
   isGenerating: boolean;
   aiResult: any;
   errorMessage: string;
-}>();
+  previewRecords: PreviewRecord[];
+  isTestingApiKey: boolean;
+  apiKeyTestResult: { success: boolean; message: string } | null;
+}>(), {
+  previewRecords: () => []
+});
 
 // 组件事件
 const emit = defineEmits<{
@@ -73,8 +140,29 @@ const emit = defineEmits<{
   (e: 'updatePrompt', prompt: string): void;
   (e: 'saveApiKey'): void;
   (e: 'testApiKey'): void;
-  (e: 'generateAiContent'): void;
+  (e: 'generateAiContent', selectedPreviews: PreviewRecord[]): void;
 }>();
+
+// 选中的预览图片ID
+const selectedPreviewIds = ref<string[]>([]);
+
+// 计算选中的预览图片
+const selectedPreviews = computed(() => {
+  // 确保previewRecords是数组，selectedPreviewIds.value是数组
+  const records = Array.isArray(props.previewRecords) ? props.previewRecords : [];
+  const ids = Array.isArray(selectedPreviewIds.value) ? selectedPreviewIds.value : [];
+  
+  return records.filter(record => ids.includes(record.id));
+});
+
+// 处理预览图片选择变化
+const handlePreviewSelectionChange = (event: Event) => {
+  // 直接使用v-model双向绑定，无需手动处理事件
+  // 确保selectedPreviewIds.value始终是数组
+  if (!Array.isArray(selectedPreviewIds.value)) {
+    selectedPreviewIds.value = [];
+  }
+};
 
 // 更新API Key
 const updateApiKey = (event: Event) => {
@@ -100,7 +188,15 @@ const testApiKey = () => {
 
 // 生成AI文案
 const generateAiContent = () => {
-  emit('generateAiContent');
+  try {
+    // 确保selectedPreviews.value是数组
+    const previews = Array.isArray(selectedPreviews.value) ? selectedPreviews.value : [];
+    emit('generateAiContent', previews);
+  } catch (error) {
+    console.error('Error in generateAiContent:', error);
+    // 即使出错，也要确保传递一个数组
+    emit('generateAiContent', []);
+  }
 };
 </script>
 
@@ -131,6 +227,79 @@ h2 {
   color: #555;
 }
 
+/* 预览图片选择 */
+.preview-selection {
+  margin-bottom: 20px;
+}
+
+.preview-selection label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #555;
+}
+
+.preview-checkbox-list {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.preview-checkbox-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 5px;
+}
+
+.preview-checkbox-item:hover {
+  background-color: #f0f0f0;
+}
+
+.preview-checkbox-item input[type="checkbox"] {
+  margin-right: 10px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.preview-checkbox-label {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  flex: 1;
+}
+
+.preview-checkbox-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.preview-checkbox-time {
+  font-size: 12px;
+  color: #999;
+}
+
+.no-previews {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+  font-style: italic;
+}
+
+/* 复选框样式美化 */
+.preview-checkbox-item input[type="checkbox"] {
+  accent-color: #3366ff;
+}
+
 .api-key-section input {
   width: 100%;
   padding: 8px;
@@ -151,6 +320,54 @@ h2 {
 
 .api-key-section button:hover {
   background: #f0f0f0;
+}
+
+.test-button {
+  margin-left: 10px;
+}
+
+.test-button:disabled {
+  background: #f0f0f0;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* API Key测试结果 */
+.api-key-test-result {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.test-result-content {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.test-result-content.success {
+  background-color: #e8f5e8;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+}
+
+.test-result-content.error {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ffcdd2;
+}
+
+.test-result-icon {
+  margin-right: 8px;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.test-result-message {
+  flex: 1;
+  line-height: 1.4;
 }
 
 /* 提示词输入 */

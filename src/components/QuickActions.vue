@@ -43,29 +43,32 @@ const resetCanvas = () => {
 <style scoped>
 .quick-actions {
   display: flex;
-  gap: 10px;
-  margin-bottom: 15px;
+  gap: 8px;
+  margin-bottom: 0;
   align-items: center;
 }
 
 .quick-actions button {
-  padding: 12px 20px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 10px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
   background: white;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 14px;
   font-weight: 500;
+  color: #666;
 }
 
 .quick-actions button:hover {
-  background: #f0f0f0;
+  background: #f8f9fa;
+  border-color: #3366ff;
+  color: #3366ff;
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(51, 102, 255, 0.15);
 }
 
 /* 文件上传包装器 */
@@ -88,37 +91,45 @@ const resetCanvas = () => {
 .file-upload-label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
+  gap: 6px;
+  padding: 10px 16px;
   border: 1px solid #4CAF50;
-  border-radius: 4px;
+  border-radius: 6px;
   background: #4CAF50;
   color: white;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   font-size: 14px;
   font-weight: 500;
   z-index: 1;
+  white-space: nowrap;
 }
 
 .file-upload-label:hover {
   background: #45a049;
-  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
   transform: translateY(-1px);
 }
 
 .file-upload-label .icon {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .quick-actions .icon {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
   .quick-actions {
     flex-direction: column;
+    width: 100%;
+  }
+  
+  .quick-actions button,
+  .file-upload-label {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>
