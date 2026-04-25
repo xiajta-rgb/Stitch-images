@@ -19,6 +19,7 @@
 import { ref, provide, onMounted } from 'vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+import { PreviewRecord } from './types';
 import api from './services/api';
 
 const confirmDialogRef = ref<any>(null);
@@ -40,16 +41,6 @@ const openConfirm = (
 
 provide('openConfirm', openConfirm);
 
-// 预览记录接口
-interface PreviewRecord {
-  id: string;
-  dataURL: string;
-  timestamp: string | Date;
-  name?: string;
-  tags?: string[];
-  sourceUrl?: string;
-}
-
 // 全局预览记录状态
 const previewRecords = ref<PreviewRecord[]>([]);
 
@@ -59,34 +50,20 @@ provide('previewRecords', previewRecords);
 // 从 API 加载数据
 const loadData = async () => {
   try {
-    console.log('正在从后端加载数据...');
     const data = await api.getGallery();
-    console.log('加载到的数据:', data);
-    previewRecords.value = data.map((item: any) => ({
+    previewRecords.value = data.map((item: PreviewRecord) => ({
       ...item,
       timestamp: new Date(item.timestamp)
     }));
-    console.log('转换后的 previewRecords:', previewRecords.value);
   } catch (error) {
     console.error('加载数据失败:', error);
-    // 尝试健康检查
-    try {
-      await api.healthCheck();
-    } catch (e) {
-      console.error('后端服务不可用，使用本地内存存储');
-    }
   }
 };
 
-// 更新预览记录的方法
-const updatePreviewRecords = async (records: PreviewRecord[]) => {
-  // 比较并同步到 API
-  // 简化版本：直接设置内存中的值
-  previewRecords.value = records;
-};
-
 // 提供更新方法给子组件
-provide('updatePreviewRecords', updatePreviewRecords);
+provide('updatePreviewRecords', (records: PreviewRecord[]) => {
+  previewRecords.value = records;
+});
 
 // 挂载时加载数据
 onMounted(() => {
@@ -141,5 +118,10 @@ onMounted(() => {
   padding: 60px 20px 30px;
   box-sizing: border-box;
   min-height: 100vh;
+  overflow: visible !important;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: block;
 }
 </style>

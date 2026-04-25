@@ -144,7 +144,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, defineEmits, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
+import { useGridConfig } from '../composables/useGridConfig';
+import { useImageProcessor, type ImageState } from '../composables/useImageProcessor';
+import { usePreviewRecords, type PreviewRecord as PreviewRecordType } from '../composables/usePreviewRecords';
+import { generateUniqueId } from '../utils';
+
+const {
+  gridLineWidth,
+  gridGap,
+  gridMargin,
+  noGap,
+  updateGridLineWidth: updateComposedGridLineWidth,
+  updateGridGap: updateComposedGridGap,
+  updateGridMargin: updateComposedGridMargin
+} = useGridConfig();
+
+const {
+  cellImages,
+  loadImageAsDataURL: loadComposedImageAsDataURL,
+  setImageState: setComposedImageState,
+  clearImageState: clearComposedImageState
+} = useImageProcessor();
+
+const {
+  previewRecords,
+  addPreviewRecord: addComposedPreviewRecord
+} = usePreviewRecords();
+
+const downloadImage = (dataURL: string, filename: string) => {
+  const link = document.createElement('a')
+  link.href = dataURL
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
 
 // 组件属性
 const props = defineProps<{
@@ -152,7 +187,6 @@ const props = defineProps<{
   canvasHeight: number;
   canvasBackgroundColor: string;
   showGrid: boolean;
-  selectedObject: any;
   uploadedImage: string;
   imageInfo: {
     name: string;
@@ -179,19 +213,12 @@ const emit = defineEmits<{
 }>();
 
 // 响应式数据
-const gridLineWidth = ref(1.5);
-const gridGap = ref(20); // 宫格间距，默认20px
-const gridMargin = ref(20); // 宫格与画布边缘的间距，默认20px
-const noGap = ref(false); // 无间距选项，默认未选中
-
-// 响应式数据
 const canvas = ref<HTMLCanvasElement>();
 const canvasContainer = ref<HTMLDivElement>();
 const gridCanvasContainer = ref<HTMLDivElement>();
-const exportPreviewCanvas = ref<HTMLCanvasElement>(); // 导出预览画布
+const exportPreviewCanvas = ref<HTMLCanvasElement>();
 
 // 导出相关
-const selectedExportFormat = ref('');
 const pendingExportFormat = ref('');
 
 const handleExportFormatChange = (e: Event) => {
@@ -230,8 +257,8 @@ watch([() => props.canvasWidth, () => props.canvasHeight], () => {
 watch(() => props.gridConfig, (newConfig) => {
   gridConfig.rows = newConfig.rows;
   gridConfig.cols = newConfig.cols;
-  if (newConfig.gap !== undefined) {
-    gridGap.value = newConfig.gap;
+  if ('gap' in newConfig) {
+    gridGap.value = (newConfig as any).gap;
   }
   if (props.showGrid) {
     drawGridSystem();
@@ -240,45 +267,6 @@ watch(() => props.gridConfig, (newConfig) => {
 
 // 宫格canvas数组
 const cellCanvases: HTMLCanvasElement[][] = [];
-
-// 图片状态接口
-interface ImageState {
-  dataURL: string;
-  x: number;
-  y: number;
-  scale: number;
-  rotation: number;
-  width: number;
-  height: number;
-}
-
-// 保存每个宫格的图片数据和状态
-const cellImages = ref<(ImageState | null)[][]>([]);
-
-// 预览记录接口
-interface PreviewRecord {
-  id: string;
-  dataURL: string;
-  timestamp: Date;
-}
-
-// 保存预览记录
-const previewRecords = ref<PreviewRecord[]>([]);
-
-// 生成唯一ID
-const generateUniqueId = () => {
-  return `preview_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-};
-
-// 下载图片
-const downloadImage = (dataURL: string, filename: string) => {
-  const link = document.createElement('a');
-  link.href = dataURL;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
 
 // 初始化画布
 const initCanvas = async () => {
@@ -343,12 +331,7 @@ const drawCanvasBackground = () => {
 
 // 删除宫格中的图片
 const deleteCellImage = (row: number, col: number) => {
-  // 清除图片数据
-  if (cellImages.value[row] && cellImages.value[row][col]) {
-    cellImages.value[row][col] = null;
-  }
-  
-  // 重新绘制宫格系统，这样会重新添加点击上传事件和悬停效果
+  clearComposedImageState(row, col);
   drawGridSystem();
 };
 
@@ -1071,14 +1054,18 @@ const handleCellClick = (row: number, col: number) => {
 };
 
 // 绘制图片到宫格canvas
-const drawImageToCell = (row: number, col: number, dataURL: string) => {
-  // 确保cellImages数组大小正确
-  while (cellImages.value.length <= row) {
-    cellImages.value.push([]);
+const drawImageToCell = async (row: number, col: number, dataURL: string) => {
+  const cleanDataURL = await loadComposedImageAsDataURL(dataURL);
+
+  // 如果图片无法访问（返回空字符串），则不导入
+  if (!cleanDataURL) {
+    console.warn('图片无法访问，跳过导入');
+    return;
   }
-  
+
   // 加载图片获取原始尺寸
   const img = new Image();
+  img.crossOrigin = 'anonymous';
   img.onload = () => {
     // 计算宫格尺寸，用于确定图片的初始缩放比例
     const rows = props.gridConfig.rows;
@@ -1089,23 +1076,23 @@ const drawImageToCell = (row: number, col: number, dataURL: string) => {
     const availableHeight = props.canvasHeight - 2 * gridMargin.value;
     const cellWidth = (availableWidth - totalGapWidth) / cols;
     const cellHeight = (availableHeight - totalGapHeight) / rows;
-    
+
     // 计算初始缩放比例，确保图片完全显示在宫格内，不会超出
     const imgWidth = img.width;
     const imgHeight = img.height;
-    
+
     // 计算缩放比例，确保图片完全显示在宫格内，不会超出
     // 使用Math.min确保图片的宽和高都不会超过宫格的宽和高
     const scaleFactor = Math.min(cellWidth / imgWidth, cellHeight / imgHeight);
-    
+
     // 限制最小缩放比例，确保图片不会太小
     // 这里设置最小缩放比例为0.8，确保图片有合适的大小
     const initialScale = Math.max(0.8, scaleFactor);
-    
+
     // 获取当前宫格的图片状态，如果存在则保持原有状态，只更新dataURL和尺寸
-    const currentState = cellImages.value[row][col];
-    const imageState: ImageState = {
-      dataURL,
+    const currentState = cellImages.value[row]?.[col];
+    const imageState = {
+      dataURL: cleanDataURL,
       x: currentState ? currentState.x : 0,
       y: currentState ? currentState.y : 0,
       scale: currentState ? currentState.scale : initialScale,
@@ -1113,13 +1100,20 @@ const drawImageToCell = (row: number, col: number, dataURL: string) => {
       width: img.width,
       height: img.height
     };
-    
-    cellImages.value[row][col] = imageState;
-    
+
+    setComposedImageState(row, col, imageState);
+
     // 重新绘制宫格系统，确保图片正确显示，并且上传提示文字被隐藏
     drawGridSystem();
+
+    // 滚动到画布容器顶部，确保图片可见
+    nextTick(() => {
+      if (gridCanvasContainer.value) {
+        gridCanvasContainer.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
   };
-  img.src = dataURL;
+  img.src = cleanDataURL;
 };
 
 // 根据图片状态绘制图片
@@ -1132,36 +1126,37 @@ const drawImageWithState = (row: number, col: number, imageState: ImageState) =>
   
   // 创建图片对象
   const img = new Image();
+  img.crossOrigin = 'anonymous';
   img.onload = () => {
     // 清除canvas
     cellCtx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
-    
+
     // 直接使用imageState中保存的图片尺寸
     const drawWidth = imageState.width * imageState.scale;
     const drawHeight = imageState.height * imageState.scale;
-    
+
     // 计算居中位置
     const centerX = cellCanvas.width / 2;
     const centerY = cellCanvas.height / 2;
-    
+
     // 保存当前上下文状态
     cellCtx.save();
-    
+
     // 移动到画布中心
     cellCtx.translate(centerX, centerY);
-    
+
     // 应用旋转
     cellCtx.rotate(imageState.rotation * Math.PI / 180);
-    
+
     // 绘制图片，以中心为原点
     cellCtx.drawImage(
-      img, 
-      -drawWidth / 2 + imageState.x, 
-      -drawHeight / 2 + imageState.y, 
-      drawWidth, 
+      img,
+      -drawWidth / 2 + imageState.x,
+      -drawHeight / 2 + imageState.y,
+      drawWidth,
       drawHeight
     );
-    
+
     // 恢复上下文状态
     cellCtx.restore();
   };
@@ -1179,7 +1174,6 @@ defineExpose({
 // 更新背景色
 const updateBackgroundColor = (event: Event) => {
   const target = event.target as HTMLInputElement;
-  console.log('CanvasContainer: updateBackgroundColor called', target.value);
   emit('updateBackgroundColor', target.value);
 };
 
@@ -1309,41 +1303,46 @@ const generateExportPreview = async () => {
         if (savedImage) {
           const drawPromise = new Promise<void>((resolve) => {
             const img = new Image();
+            img.crossOrigin = 'anonymous';
             img.onload = () => {
               // 保存当前上下文状态
               tempCtx.save();
-              
+
               // 1. 创建宫格裁剪路径，确保图片只在宫格内显示
               tempCtx.beginPath();
               tempCtx.rect(x, y, cellWidth, cellHeight);
               tempCtx.clip();
-              
+
               // 2. 移动到宫格中心
               tempCtx.translate(x + cellWidth / 2, y + cellHeight / 2);
-              
+
               // 3. 应用旋转
               tempCtx.rotate(savedImage.rotation * Math.PI / 180);
-              
+
               // 4. 计算绘制尺寸
               const drawWidth = savedImage.width * savedImage.scale;
               const drawHeight = savedImage.height * savedImage.scale;
-              
+
               // 5. 绘制图片
               tempCtx.drawImage(
-                img, 
-                -drawWidth / 2 + savedImage.x, 
-                -drawHeight / 2 + savedImage.y, 
-                drawWidth, 
+                img,
+                -drawWidth / 2 + savedImage.x,
+                -drawHeight / 2 + savedImage.y,
+                drawWidth,
                 drawHeight
               );
-              
+
               // 6. 恢复上下文状态
               tempCtx.restore();
               resolve();
             };
+            img.onerror = () => {
+              console.warn(`图片加载失败，跳过该图片: ${savedImage.dataURL}`);
+              resolve();
+            };
             img.src = savedImage.dataURL;
           });
-          
+
           drawPromises.push(drawPromise);
         }
       }
@@ -1359,7 +1358,7 @@ const generateExportPreview = async () => {
     const fullSizeDataURL = tempCanvas.toDataURL('image/jpeg', 1.0);
     
     // 8. 创建预览记录
-    const newRecord: PreviewRecord = {
+    const newRecord: PreviewRecordType = {
       id: generateUniqueId(),
       dataURL: fullSizeDataURL,
       timestamp: new Date()

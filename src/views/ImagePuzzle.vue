@@ -32,7 +32,6 @@
       :canvasHeight="canvasHeight"
       :canvasBackgroundColor="canvasBackgroundColor"
       :showGrid="showGrid"
-      :selectedObject="selectedObject"
       :uploadedImage="uploadedImage"
       :imageInfo="imageInfo"
       :gridConfig="currentGridConfig"
@@ -86,7 +85,7 @@
                     :class="{ selected: selectedGalleryIds.includes(img.id) }"
                     @click="toggleGallerySelect(img.id)"
                   >
-                    <input type="checkbox" :checked="selectedGalleryIds.includes(img.id)" @click.stop />
+                    <input type="radio" name="gallery-select" :checked="selectedGalleryIds.includes(img.id)" @click.stop />
                     <div class="img-preview">
                       <img v-if="getGalleryImgSrc(img)" :src="getGalleryImgSrc(img)" :alt="img.name" @error="handleGalleryImgError" />
                       <div v-else class="img-placeholder">暂无图片</div>
@@ -95,7 +94,10 @@
                       <span v-for="(tag, i) in img.tags.slice(0, 2)" :key="i" class="img-tag">{{ tag }}</span>
                     </div>
                     <div class="img-info">
-                      <span class="img-name">{{ img.name || '未命名' }}</span>
+                      <span class="img-name" :class="{ unnamed: !img.name }">{{ img.name || '未命名' }}</span>
+                      <div class="img-info-tags" v-if="img.tags?.length">
+                        <span v-for="(tag, i) in img.tags.slice(0, 2)" :key="i" class="img-info-tag">{{ tag }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -114,12 +116,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, inject, nextTick, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, inject, computed } from 'vue';
+import { ShowToastFunction, PreviewRecordsRef, UpdatePreviewRecordsFunction } from '../types';
 
 // 注入全局预览记录状态
-const globalPreviewRecords = inject('previewRecords');
-const updateGlobalPreviewRecords = inject('updatePreviewRecords');
-const showToast = inject('showToast');
+const globalPreviewRecords = inject<PreviewRecordsRef>('previewRecords');
+const updateGlobalPreviewRecords = inject<UpdatePreviewRecordsFunction>('updatePreviewRecords');
+const showToast = inject<ShowToastFunction>('showToast');
 
 // 导入组件
 import HeaderControls from '../components/HeaderControls.vue';
@@ -160,7 +163,6 @@ const gridMargin = ref(20); // 宫格与画布边缘的间距，默认20px
 const showContextMenu = ref(false);
 const menuX = ref(0);
 const menuY = ref(0);
-let selectedImage: any = null;
 
 // CanvasContainer组件引用
 const canvasContainerRef = ref<any>(null);
@@ -199,10 +201,8 @@ const galleryImages = computed(() => globalPreviewRecords?.value || []);
 const gallerySearchKeyword = ref('');
 const filteredGalleryImages = computed(() => {
   const keyword = gallerySearchKeyword.value.toLowerCase().trim();
-  const hasValidImage = (img: any) => img.dataURL || img.sourceUrl;
-  if (!keyword) return galleryImages.value.filter(hasValidImage);
+  if (!keyword) return galleryImages.value;
   return galleryImages.value.filter(img => {
-    if (!hasValidImage(img)) return false;
     const nameMatch = img.name?.toLowerCase().includes(keyword);
     const tagMatch = Array.isArray(img.tags) && img.tags.some((tag: string) => tag.toLowerCase().includes(keyword));
     return nameMatch || tagMatch;
@@ -227,39 +227,64 @@ const refreshGallery = async () => {
 const handleGalleryImgError = (e: Event) => {
   const img = e.target as HTMLImageElement;
   img.style.display = 'none';
-  img.parentElement.querySelector('.img-placeholder')?.classList.add('show');
+  img.parentElement?.querySelector('.img-placeholder')?.classList.add('show');
 };
 
 const toggleGallerySelect = (id: string) => {
-  const index = selectedGalleryIds.value.indexOf(id);
-  if (index > -1) {
-    selectedGalleryIds.value.splice(index, 1);
+  if (selectedGalleryIds.value.includes(id)) {
+    selectedGalleryIds.value = [];
   } else {
-    selectedGalleryIds.value.push(id);
+    selectedGalleryIds.value = [id];
   }
 };
 
 const importFromGallery = () => {
   const selectedImages = galleryImages.value.filter(img => selectedGalleryIds.value.includes(img.id));
-  if (selectedImages.length > 0) {
-    if (selectedImages.length === 1) {
-      uploadedImage.value = getGalleryImgSrc(selectedImages[0]);
-      imageInfo.value = {
-        name: selectedImages[0].name || 'gallery-image',
-        type: 'image/jpeg',
-        size: 0
-      };
-    } else {
-      selectedImages.forEach((img, index) => {
-        if (canvasContainerRef.value) {
-          canvasContainerRef.value.handleMultipleImages([{
-            dataURL: getGalleryImgSrc(img),
-            name: img.name || `gallery-image-${index}`
-          }]);
+  if (selectedImages.length === 0) {
+    return;
+  }
+
+  if (selectedImages.length === 1) {
+    const dataURL = getGalleryImgSrc(selectedImages[0]);
+    if (dataURL) {
+      const rows = currentGridConfig.value.rows;
+      const cols = currentGridConfig.value.cols;
+      if (rows > 0 && cols > 0) {
+        let targetRow = 0;
+        let targetCol = 0;
+        if (currentGridIndex !== null) {
+          targetRow = Math.floor(currentGridIndex / cols);
+          targetCol = currentGridIndex % cols;
         }
-      });
+        drawImageToCellCanvas(targetRow, targetCol, dataURL);
+        currentGridIndex = null;
+      }
+      if (showToast) {
+        showToast(`已导入图片到画布`, 'success');
+      }
+    }
+  } else {
+    const rows = currentGridConfig.value.rows;
+    const cols = currentGridConfig.value.cols;
+    let cellIndex = 0;
+    const totalCells = rows * cols;
+
+    selectedImages.forEach((img) => {
+      if (cellIndex >= totalCells) return;
+      const row = Math.floor(cellIndex / cols);
+      const col = cellIndex % cols;
+      const dataURL = getGalleryImgSrc(img);
+      if (dataURL) {
+        drawImageToCellCanvas(row, col, dataURL);
+      }
+      cellIndex++;
+    });
+
+    if (showToast) {
+      showToast(`已导入 ${Math.min(selectedImages.length, totalCells)} 张图片到宫格`, 'success');
     }
   }
+
   showGalleryModal.value = false;
   selectedGalleryIds.value = [];
 };
@@ -268,22 +293,11 @@ const importFromGallery = () => {
 const initCanvas = () => {
   // 如果画布已经初始化，就不再重复初始化
   if (isCanvasInitialized) {
-    console.log('画布已经初始化，不再重复初始化');
     return;
   }
-  
-  console.log('开始初始化画布');
-  console.log('画布宽度:', canvasWidth.value);
-  console.log('画布高度:', canvasHeight.value);
-  console.log('画布背景色:', canvasBackgroundColor.value);
-  
+
   try {
-    console.log('画布初始化完成');
-    
-    // 设置标志，确保initCanvas()函数只被调用一次
     isCanvasInitialized = true;
-    console.log('画布初始化完成');
-    
   } catch (error) {
     console.error('初始化画布失败:', error);
   }
@@ -313,30 +327,23 @@ const drawImageToCellCanvas = (row: number, col: number, dataURL: string) => {
     // 创建图片对象
     const imgElement = new Image();
     imgElement.onload = function() {
-      console.log('HTML图片元素加载完成:', imgElement.width, 'x', imgElement.height);
-      
-      // 获取canvas上下文
       const ctx = cellCanvas.getContext('2d');
       if (!ctx) {
         console.error('无法获取canvas上下文');
         return;
       }
-      
-      // 清除canvas
+
       ctx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
-      
-      // 计算缩放比例，确保图片完全覆盖canvas
+
       const imgWidth = imgElement.width;
       const imgHeight = imgElement.height;
       const scale = Math.max(cellCanvas.width / imgWidth, cellCanvas.height / imgHeight);
-      
-      // 计算图片绘制位置，居中显示
+
       const drawWidth = imgWidth * scale;
       const drawHeight = imgHeight * scale;
       const offsetX = (cellCanvas.width - drawWidth) / 2;
       const offsetY = (cellCanvas.height - drawHeight) / 2;
-      
-      // 绘制图片，超出canvas的部分会自动被裁剪
+
       ctx.drawImage(imgElement, offsetX, offsetY, drawWidth, drawHeight);
     };
     
@@ -350,8 +357,6 @@ const drawImageToCellCanvas = (row: number, col: number, dataURL: string) => {
 
 // 绘制网格 - 调用 CanvasContainer 组件中的宫格系统
 const drawGrid = () => {
-  // 宫格系统现在由 CanvasContainer 组件负责绘制
-  console.log('宫格系统由 CanvasContainer 组件负责绘制');
 };
 
 // 选择模板
@@ -405,50 +410,31 @@ const selectResolution = (resolution: any) => {
 const resetCanvasSizeAndGrid = () => {
   if (!canvasElement) return;
   
-  console.log('重置画布尺寸和网格');
-  console.log('当前canvasWidth.value:', canvasWidth.value);
-  console.log('当前canvasHeight.value:', canvasHeight.value);
-  console.log('当前canvasElement宽度:', canvasElement.width);
-  console.log('当前canvasElement高度:', canvasElement.height);
-  
   // 更新canvasElement的尺寸
   canvasElement.width = canvasWidth.value;
   canvasElement.height = canvasHeight.value;
-  
+
   // 重新绘制网格
   if (showGrid.value) {
-    console.log('重新绘制网格辅助线');
     drawGrid();
   }
 };
 
 // 处理文件上传
 const handleFileUpload = (event: Event) => {
-  console.log('=== 文件上传事件触发 ===');
-  
   try {
     let files: FileList | null = null;
-    
-    // 检查事件是否来自文件输入元素
+
     if (event.target && (event.target as HTMLInputElement).files) {
-      // 来自QuickActions组件或drawGrid函数中的隐藏input
       const input = event.target as HTMLInputElement;
       files = input.files;
-      console.log('input元素:', input);
-      console.log('files:', files);
-      console.log('input id:', input.id);
     } else {
-      // 可能是其他类型的事件，直接返回
-      console.log('事件不是来自文件输入元素');
       return;
     }
-    
+
     if (!files || files.length === 0) {
-      console.log('未选择文件');
       return;
     }
-    
-    console.log('文件上传:', files.length, '个文件');
     
     // 获取当前选中的模板
     const template = templates.find(t => t.id === selectedTemplate.value);
@@ -459,59 +445,18 @@ const handleFileUpload = (event: Event) => {
       }
       return;
     }
-    
-    console.log('当前选中的模板:', template);
-    const { rows, cols, gap } = template.grid;
-    console.log('模板宫格布局:', rows, '行', cols, '列');
-    
-    // 画布初始化由CanvasContainer组件处理，无需额外检查
-    
-    // 使用响应式状态中的画布尺寸，确保与drawGrid函数保持一致
-    const localCanvasWidth = canvasWidth.value;
-    const localCanvasHeight = canvasHeight.value;
-    
-    // 重新计算宫格尺寸，确保与drawGrid函数使用相同的逻辑
-    // 使用动态的gridGap.value，而不是模板中的固定gap值
-    const currentGap = gridGap.value;
-    // 使用独立的边缘间距设置，与drawGrid函数保持一致
-    const margin = gridMargin.value;
-    const totalGapWidth = (cols - 1) * currentGap;
-    const totalGapHeight = (rows - 1) * currentGap;
-    
-    // 计算实际可用空间（减去边缘间距）
-    const availableWidth = localCanvasWidth - 2 * margin;
-    const availableHeight = localCanvasHeight - 2 * margin;
-    
-    // 宫格宽度 = (可用宽度 - 总间距宽度) / 列数
-    const cellWidth = (availableWidth - totalGapWidth) / cols;
-    const cellHeight = (availableHeight - totalGapHeight) / rows;
-    
-    // 验证宫格系统总尺寸是否等于画布尺寸
-    const gridTotalWidth = cols * cellWidth + (cols - 1) * gridGap.value;
-    const gridTotalHeight = rows * cellHeight + (rows - 1) * gridGap.value;
-    
-    console.log('画布尺寸:', localCanvasWidth, 'x', localCanvasHeight);
-    console.log('宫格系统总尺寸:', gridTotalWidth, 'x', gridTotalHeight);
-    console.log('每个宫格尺寸:', cellWidth, 'x', cellHeight);
-    console.log('间距:', gridGap.value);
-    console.log('总间距:', totalGapWidth, 'x', totalGapHeight);
-    console.log('宫格系统是否完全填充画布:', gridTotalWidth === localCanvasWidth && gridTotalHeight === localCanvasHeight);
-    
-    // 计算宫格数量
+
+    const { rows, cols } = template.grid;
+
     const totalCells = rows * cols;
-    console.log('总宫格数量:', totalCells);
-    
+
     // 限制文件数量
     const validFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-    console.log('有效图片文件数量:', validFiles.length);
-    
-    // 获取事件目标元素的id，用于区分不同的文件输入源
+
     const inputId = (event.target as HTMLInputElement).id;
-    console.log('输入源ID:', inputId);
-    
+
     // 检查是否有有效的图片文件
     if (validFiles.length === 0) {
-      console.log('没有有效的图片文件');
       if (showToast) {
         showToast('请选择图片文件', 'warning');
       }
@@ -523,41 +468,28 @@ const handleFileUpload = (event: Event) => {
     
     // 检查是否是分宫格上传（通过input id判断）
     if (inputId === 'grid-file-input' && currentGridIndex !== null) {
-      // 分宫格上传：只处理第一个选择的文件，上传到指定宫格
-      console.log('分宫格上传，宫格索引:', currentGridIndex);
-      
-      const file = validFiles[0]; // 只处理第一个文件
-      console.log('处理单个文件:', file.name, file.type, file.size);
-      
-      // 计算指定宫格的位置
+      const file = validFiles[0];
+
       const row = Math.floor(currentGridIndex / cols);
       const col = currentGridIndex % cols;
-      console.log('图片位置:', row, '行', col, '列');
-      
-      // 获取fileInput元素，以便清除value
+
       const fileInput = document.getElementById('grid-file-input') as HTMLInputElement;
-      
-      // 使用FileReader读取文件为DataURL
+
       const reader = new FileReader();
       reader.onload = function(e) {
         const dataURL = e.target?.result as string;
-        console.log('文件读取为DataURL成功，长度:', dataURL.length);
-        
-        // 更新图片预览信息
+
         uploadedImage.value = dataURL;
         imageInfo.value = {
           name: file.name,
           type: file.type,
           size: file.size
         };
-        
-        // 直接绘制图片到指定宫格画布
+
         drawImageToCellCanvas(row, col, dataURL);
-        
-        // 重置当前宫格索引
+
         currentGridIndex = null;
-        
-        // 清除input的value，以便下次选择同一个文件时能触发change事件
+
         if (fileInput) {
           fileInput.value = '';
         }
@@ -575,30 +507,22 @@ const handleFileUpload = (event: Event) => {
       
       reader.readAsDataURL(file);
     } else if (inputId === 'basicFileInput') {
-      // 批量上传：处理所有选择的文件，每个宫格放一张图片
       const processFiles = validFiles.slice(0, totalCells);
-      console.log('批量上传，有效图片文件数量:', processFiles.length);
-      
+
       if (processFiles.length === 0) {
-        console.log('没有有效的图片文件');
         if (showToast) {
           showToast('请选择图片文件', 'warning');
         }
         return;
       }
-      
-      // 清空画布中的所有图片（保留网格线和上传区域）
-      console.log('清空画布中的所有图片');
-      // 直接清除所有宫格画布的内容
+
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
           const cellCanvas = document.getElementById(`cell-canvas-${row}-${col}`) as HTMLCanvasElement;
           if (cellCanvas) {
             const ctx = cellCanvas.getContext('2d');
             if (ctx) {
-              // 清除画布内容
               ctx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
-              // 重新绘制上传提示文字
               ctx.fillStyle = 'rgba(245, 245, 245, 0.6)';
               ctx.fillRect(0, 0, cellCanvas.width, cellCanvas.height);
               ctx.fillStyle = '#666666';
@@ -613,21 +537,13 @@ const handleFileUpload = (event: Event) => {
       
       // 处理每个文件，每个宫格放一张图片
       processFiles.forEach((file, index) => {
-        console.log('处理文件:', index + 1, file.name, file.type, file.size);
-        
-        // 计算图片在宫格中的位置，确保每个宫格只能放一张图片
         const row = Math.floor(index / cols);
         const col = index % cols;
-        const gridIndex = row * cols + col;
-        console.log('图片位置:', row, '行', col, '列', '宫格索引:', gridIndex);
-        
-        // 使用FileReader读取文件为DataURL
+
         const reader = new FileReader();
         reader.onload = function(e) {
           const dataURL = e.target?.result as string;
-          console.log('文件读取为DataURL成功，长度:', dataURL.length);
-          
-          // 更新图片预览信息（只更新第一个图片）
+
           if (index === 0) {
             uploadedImage.value = dataURL;
             imageInfo.value = {
@@ -636,8 +552,7 @@ const handleFileUpload = (event: Event) => {
               size: file.size
             };
           }
-          
-          // 直接绘制图片到指定宫格画布
+
           drawImageToCellCanvas(row, col, dataURL);
         };
         
@@ -648,12 +563,9 @@ const handleFileUpload = (event: Event) => {
         reader.readAsDataURL(file);
       });
     } else {
-      console.log('既不是分宫格上传也不是批量上传，忽略');
       return;
     }
-    
-    console.log('文件上传处理完成');
-    
+
   } catch (error) {
     console.error('处理文件上传时出错:', error);
     if (showToast) {
@@ -662,51 +574,21 @@ const handleFileUpload = (event: Event) => {
   }
 };
 
-// 重置画布
-const resetCanvas = () => {
-  console.log('重置画布');
-  
-  // 获取画布容器
-  const canvasContainer = document.querySelector('.canvas-container');
-  if (canvasContainer) {
-    // 清除所有旧的宫格canvas元素
-    const oldCanvases = canvasContainer.querySelectorAll('canvas[id^="cell-canvas-"]');
-    oldCanvases.forEach(canvas => canvas.remove());
-    
-    // 重新绘制网格和上传区域
-    if (showGrid.value) {
-      drawGrid();
-    }
-    
-    console.log('画布已重置，所有图片已清空');
-  }
-};
-
 // 处理画布初始化
 const handleCanvasInitialized = (canvas: HTMLCanvasElement) => {
   // 保存新的画布实例引用
   canvasElement = canvas;
-  
-  console.log('画布初始化事件触发，更新canvasElement引用');
-  console.log('新画布实例:', canvasElement);
-  console.log('当前canvasWidth.value:', canvasWidth.value);
-  console.log('当前canvasHeight.value:', canvasHeight.value);
-  
-  // 确保新画布实例的尺寸与canvasWidth.value和canvasHeight.value一致
+
   canvasElement.width = canvasWidth.value;
   canvasElement.height = canvasHeight.value;
-  
-  // 重新绘制网格，确保宫格系统正确显示
+
   if (showGrid.value) {
-    console.log('重新绘制网格辅助线');
     drawGrid();
   }
 };
 
 // 处理宫格点击事件
 const handleGridCellClick = async (row: number, col: number) => {
-  console.log('宫格点击:', row, col);
-  // 保存当前宫格索引
   currentGridIndex = row * currentGridConfig.value.cols + col;
   // 打开图库弹窗前先刷新数据并清空搜索
   gallerySearchKeyword.value = '';
@@ -753,11 +635,8 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
   // 获取主canvas元素
   const mainCanvas = canvasContainer.querySelector('canvas');
   if (!mainCanvas) return;
-  
-  console.log('开始导出画布，格式:', format, '质量:', quality);
-  
+
   try {
-    // 1. 创建临时画布，用于生成导出内容
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = mainCanvas.width;
     tempCanvas.height = mainCanvas.height;
@@ -819,7 +698,6 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        console.log('画布导出完成，已下载');
       })
       .catch(error => {
         console.error('下载文件时出错:', error);
@@ -1068,6 +946,8 @@ onUnmounted(() => {
   background: #fafafa;
   display: flex;
   flex-direction: column;
+  min-height: 160px;
+  height: 160px;
 }
 
 .gallery-item:hover {
@@ -1145,6 +1025,8 @@ onUnmounted(() => {
   padding: 6px 8px;
   background: white;
   border-top: 1px solid #eee;
+  flex-shrink: 0;
+  width: 100%;
 }
 
 .gallery-item .img-name {
@@ -1154,6 +1036,30 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.gallery-item .img-name.unnamed {
+  color: #999;
+  font-style: italic;
+}
+
+.gallery-item .img-info-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.gallery-item .img-info-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  background: #f0f0f0;
+  color: #666;
+  border-radius: 3px;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-footer {
