@@ -8,21 +8,21 @@
     <!-- 画布设置 -->
     <div class="canvas-settings">
       <label>背景色:</label>
-      <input 
-        type="color" 
-        :value="canvasBackgroundColor"
+      <input
+        type="color"
+        :value="props.canvasBackgroundColor"
         @change="updateBackgroundColor"
       />
       <label>
-        <input 
-          type="checkbox" 
-          :checked="showGrid"
+        <input
+          type="checkbox"
+          :checked="props.showGrid"
           @change="toggleGrid"
         />
         显示网格
       </label>
       <label>
-        <input 
+        <input
           type="checkbox"
           :checked="noGap"
           @change="toggleNoGap"
@@ -31,8 +31,8 @@
       </label>
       <label>
         宫位线粗细:
-        <input 
-          type="range" 
+        <input
+          type="range"
           :value="gridLineWidth"
           @input="updateGridLineWidth"
           min="0.5"
@@ -43,8 +43,8 @@
       </label>
       <label>
         宫格间距:
-        <input 
-          type="range" 
+        <input
+          type="range"
           :value="gridGap"
           @input="updateGridGap"
           min="0"
@@ -56,8 +56,8 @@
       </label>
       <label>
         边缘间距:
-        <input 
-          type="range" 
+        <input
+          type="range"
           :value="gridMargin"
           @input="updateGridMargin"
           min="0"
@@ -70,10 +70,10 @@
     </div>
     
     <!-- 主Canvas元素作为背景 -->
-    <canvas 
-      ref="canvas" 
-      :width="canvasWidth" 
-      :height="canvasHeight"
+    <canvas
+      ref="canvas"
+      :width="props.canvasWidth"
+      :height="props.canvasHeight"
       style="position: relative; z-index: 1;"
     ></canvas>
     
@@ -84,8 +84,23 @@
     <div class="export-preview">
       <div class="export-preview-header">
         <h4>导出预览</h4>
-        <button 
-          class="generate-preview-btn" 
+        <div class="export-actions">
+          <select class="export-select" @change="handleExportFormatChange">
+            <option value="jpg-original">JPG原图</option>
+            <option value="png-original">PNG原图</option>
+            <option value="jpg-standard">JPG标清</option>
+            <option value="png-standard">PNG标清</option>
+          </select>
+          <button
+            class="export-btn icon-only"
+            @click="triggerExport"
+            title="导出图片"
+          >
+            ↓
+          </button>
+        </div>
+        <button
+          class="generate-preview-btn"
           @click="generateExportPreview"
         >
           生成预览
@@ -160,6 +175,7 @@ const emit = defineEmits<{
   (e: 'updateGridMargin', margin: number): void;
   (e: 'gridCellClick', row: number, col: number): void;
   (e: 'drawImageToCell', row: number, col: number, dataURL: string): void;
+  (e: 'export', format: 'jpg' | 'png', quality: 'original' | 'standard'): void;
 }>();
 
 // 响应式数据
@@ -174,14 +190,53 @@ const canvasContainer = ref<HTMLDivElement>();
 const gridCanvasContainer = ref<HTMLDivElement>();
 const exportPreviewCanvas = ref<HTMLCanvasElement>(); // 导出预览画布
 
+// 导出相关
+const selectedExportFormat = ref('');
+const pendingExportFormat = ref('');
+
+const handleExportFormatChange = (e: Event) => {
+  const target = e.target as HTMLSelectElement;
+  pendingExportFormat.value = target.value;
+  if (target.value) {
+    const [format, quality] = target.value.split('-');
+    emit('export', format as 'jpg' | 'png', quality as 'original' | 'standard');
+    target.value = '';
+  }
+};
+
+const triggerExport = () => {
+  const format = pendingExportFormat.value || 'jpg-original';
+  const [fmt, quality] = format.split('-');
+  emit('export', fmt as 'jpg' | 'png', quality as 'original' | 'standard');
+};
+
 // 画布上下文
 let ctx: CanvasRenderingContext2D | null = null;
 
 // 宫格配置
 let gridConfig = {
-  rows: 3,
-  cols: 1
+  rows: props.gridConfig.rows,
+  cols: props.gridConfig.cols
 };
+
+// 监听 canvasWidth 和 canvasHeight 变化
+watch([() => props.canvasWidth, () => props.canvasHeight], () => {
+  nextTick(() => {
+    initCanvas();
+  });
+});
+
+// 监听 gridConfig 变化
+watch(() => props.gridConfig, (newConfig) => {
+  gridConfig.rows = newConfig.rows;
+  gridConfig.cols = newConfig.cols;
+  if (newConfig.gap !== undefined) {
+    gridGap.value = newConfig.gap;
+  }
+  if (props.showGrid) {
+    drawGridSystem();
+  }
+}, { deep: true });
 
 // 宫格canvas数组
 const cellCanvases: HTMLCanvasElement[][] = [];
@@ -231,38 +286,46 @@ const initCanvas = async () => {
     console.error('canvas元素或容器不存在');
     return;
   }
-  
+
+  // 保存当前的cellImages数据
+  const savedCellImages = cellImages.value.map(row => [...row]);
+
   try {
     // 1. 设置canvas元素的实际像素尺寸
     canvas.value.width = props.canvasWidth;
     canvas.value.height = props.canvasHeight;
-    
+
     // 2. 设置canvas元素的CSS尺寸
     canvas.value.style.width = `${props.canvasWidth}px`;
     canvas.value.style.height = `${props.canvasHeight}px`;
-    
+
     // 3. 获取画布上下文
     ctx = canvas.value.getContext('2d');
     if (!ctx) {
       throw new Error('无法获取画布上下文');
     }
-    
+
     // 4. 设置gridCanvasContainer的尺寸和位置
     gridCanvasContainer.value.style.width = `${props.canvasWidth}px`;
     gridCanvasContainer.value.style.height = `${props.canvasHeight}px`;
     gridCanvasContainer.value.style.position = 'absolute';
     gridCanvasContainer.value.style.top = `${canvas.value.offsetTop}px`;
     gridCanvasContainer.value.style.left = `${canvas.value.offsetLeft}px`;
-    
+
     // 5. 绘制画布背景
     drawCanvasBackground();
-    
-    // 6. 绘制宫格系统
+
+    // 6. 恢复cellImages数据
+    if (savedCellImages.length > 0) {
+      cellImages.value = savedCellImages;
+    }
+
+    // 7. 绘制宫格系统（会使用恢复的cellImages数据）
     if (props.showGrid) {
       drawGridSystem();
     }
-    
-    // 7. 触发画布初始化事件
+
+    // 8. 触发画布初始化事件
     emit('canvasInitialized', { canvas: canvas.value, ctx });
     
   } catch (error) {
@@ -337,7 +400,8 @@ const drawGridSystem = () => {
       cellContainer.style.width = `${cellWidth}px`;
       cellContainer.style.height = `${cellHeight}px`;
       cellContainer.style.zIndex = '3';
-      cellContainer.style.border = 'none';
+      cellContainer.style.border = `${gridLineWidth.value}px dashed #666`;
+      cellContainer.style.boxSizing = 'border-box';
       cellContainer.style.transition = 'border-color 0.2s ease';
       
       // 创建宫格canvas
@@ -681,14 +745,12 @@ const drawGridSystem = () => {
       // 使用立即执行函数创建闭包，保存当前的row和col值
       (function(currentRow, currentCol) {
         cellCanvas.addEventListener('click', (e) => {
-          // 如果点击的是删除按钮，不触发上传
+          // 如果点击的是删除按钮，不触发图库导入
           if ((e.target as HTMLElement).closest('.delete-btn')) {
             return;
           }
-          // 只有当没有图片时，才触发上传
-          if (!cellImages.value[currentRow][currentCol]) {
-            handleCellClick(currentRow, currentCol);
-          }
+          // 点击宫格时，打开图库导入弹窗
+          handleCellClick(currentRow, currentCol);
         });
       })(row, col);
       
@@ -1117,6 +1179,7 @@ defineExpose({
 // 更新背景色
 const updateBackgroundColor = (event: Event) => {
   const target = event.target as HTMLInputElement;
+  console.log('CanvasContainer: updateBackgroundColor called', target.value);
   emit('updateBackgroundColor', target.value);
 };
 
@@ -1310,12 +1373,6 @@ const generateExportPreview = async () => {
   }
 };
 
-// 监听画布尺寸变化
-watch([() => props.canvasWidth, () => props.canvasHeight], () => {
-  console.log('画布尺寸变化，重新初始化画布:', props.canvasWidth, 'x', props.canvasHeight);
-  initCanvas();
-});
-
 // 监听背景色变化
 watch(() => props.canvasBackgroundColor, (newColor) => {
   drawCanvasBackground();
@@ -1373,90 +1430,93 @@ watch(previewRecords, async (newRecords) => {
 // 生命周期钩子
 onMounted(() => {
   initCanvas();
+  nextTick(() => {
+    if (props.showGrid) {
+      drawGridSystem();
+    }
+  });
 });
 </script>
 
 <style scoped>
 .canvas-container {
-  border: 1px solid #ddd;
+  border: 1px solid #e8e8e8;
   background: white;
-  margin: 0 auto 20px;
+  margin: 0 auto 12px;
   overflow: auto;
   border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   display: block;
   width: 100%;
   text-align: center;
   max-width: 100%;
   max-height: none;
   height: auto;
+  position: relative;
 }
 
 canvas {
   display: block;
   background: white;
-  margin: 10px auto;
+  margin: 6px auto;
   vertical-align: middle;
   position: relative;
   left: 0;
   top: 0;
-  /* 添加明确的画布边界 */
-  border: 2px solid #000000;
-  /* 添加阴影效果，增强立体感 */
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  /* 确保画布背景色与容器背景色有区分 */
+  border: 1px solid #ddd;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.05);
   background-color: #ffffff;
 }
 
 .canvas-header {
-  padding: 10px 15px;
-  background: #f9f9f9;
-  border-bottom: 1px solid #ddd;
-  font-size: 14px;
+  padding: 6px 10px;
+  background: #fafafa;
+  border-bottom: 1px solid #e8e8e8;
+  font-size: 12px;
   font-weight: 500;
-  color: #555;
+  color: #666;
 }
 
 /* 画布设置 */
 .canvas-settings {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 15px;
-  padding: 12px 16px;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
   background: #fafafa;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  border: 1px solid #f0f0f0;
   flex-wrap: wrap;
 }
 
 .canvas-settings label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
   color: #666;
   white-space: nowrap;
 }
 
 .canvas-settings input[type="color"] {
-  width: 36px;
-  height: 28px;
+  width: 28px;
+  height: 22px;
   border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .canvas-settings input[type="color"]:hover {
   border-color: #3366ff;
-  box-shadow: 0 0 0 2px rgba(51, 102, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(51, 102, 255, 0.1);
 }
 
 .canvas-settings input[type="range"] {
-  width: 80px;
-  margin: 0 4px;
+  width: 60px;
+  margin: 0 3px;
 }
 
 .canvas-settings input[type="checkbox"] {
@@ -1465,52 +1525,114 @@ canvas {
 
 /* 画布底部 */
 .canvas-footer {
-  padding: 10px 15px;
+  padding: 6px 10px;
   background: #fafafa;
-  border-top: 1px solid #e0e0e0;
-  font-size: 13px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 11px;
   color: #999;
   text-align: center;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 4px 4px;
 }
 
 /* 导出预览样式 */
 .export-preview {
-  padding: 15px;
+  padding: 10px;
   background: #fafafa;
-  border-top: 1px solid #e0e0e0;
-  border-radius: 0 0 6px 6px;
-  margin-top: 15px;
+  border-top: 1px solid #f0f0f0;
+  border-radius: 0 0 4px 4px;
+  margin-top: 8px;
 }
 
 .export-preview-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.export-btn {
+  padding: 5px 10px;
+  background: #3366ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.export-btn:hover {
+  background: #254edb;
+  transform: translateY(-1px);
+}
+
+.export-btn.icon-only {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: normal;
+  color: #666;
+  background: transparent;
+  border: 1px solid #ddd;
+}
+
+.export-btn.icon-only:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.export-select {
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 11px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  min-width: 100px;
+}
+
+.export-select:focus {
+  outline: none;
+  border-color: #3366ff;
 }
 
 .export-preview h4 {
   margin: 0;
   color: #333;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .generate-preview-btn {
-  padding: 6px 12px;
+  padding: 4px 10px;
   background: #3366ff;
   color: white;
   border: none;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: 3px;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .generate-preview-btn:hover {
   background: #254edb;
-  box-shadow: 0 2px 4px rgba(51, 102, 255, 0.3);
+  box-shadow: 0 1px 3px rgba(51, 102, 255, 0.2);
 }
 
 .generate-preview-btn:active {
@@ -1518,9 +1640,9 @@ canvas {
 }
 
 .export-preview-canvas {
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   background: white;
   display: block;
   margin: 0 auto;
@@ -1528,10 +1650,10 @@ canvas {
 
 /* 图片预览 */
 .image-preview {
-  padding: 15px;
+  padding: 10px;
   background: #fafafa;
-  border-top: 1px solid #e0e0e0;
-  border-radius: 0 0 6px 6px;
+  border-top: 1px solid #f0f0f0;
+  border-radius: 0 0 4px 4px;
 }
 
 /* 响应式设计 */
@@ -1546,25 +1668,25 @@ canvas {
   }
   
   .canvas-settings input[type="range"] {
-    width: 120px;
+    width: 100px;
   }
 }
 
 .image-preview h4 {
   margin-top: 0;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   color: #333;
 }
 
 .image-preview img {
-  margin-bottom: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  margin-bottom: 6px;
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
 }
 
 .image-preview p {
-  margin: 5px 0;
-  font-size: 14px;
+  margin: 3px 0;
+  font-size: 12px;
   color: #666;
 }
 
@@ -1578,49 +1700,49 @@ canvas {
 
 /* 预览记录样式 */
 .preview-records {
-  padding: 15px;
+  padding: 10px;
   background: #fafafa;
-  border-top: 1px solid #e0e0e0;
-  border-radius: 0 0 6px 6px;
-  margin-top: 15px;
+  border-top: 1px solid #f0f0f0;
+  border-radius: 0 0 4px 4px;
+  margin-top: 8px;
 }
 
 .preview-records-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: 8px;
 }
 
 .preview-records-header h4 {
   margin: 0;
   color: #333;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .preview-records-list {
   display: flex;
-  gap: 15px;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 10px;
+  padding-bottom: 6px;
   flex-wrap: nowrap;
   scrollbar-width: thin;
   scrollbar-color: #ccc transparent;
 }
 
 .preview-records-list::-webkit-scrollbar {
-  height: 6px;
+  height: 4px;
 }
 
 .preview-records-list::-webkit-scrollbar-track {
   background: #f1f1f1;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .preview-records-list::-webkit-scrollbar-thumb {
   background: #ccc;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .preview-records-list::-webkit-scrollbar-thumb:hover {
@@ -1633,24 +1755,24 @@ canvas {
   align-items: center;
   background: white;
   border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 10px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  min-width: 170px;
+  border-radius: 4px;
+  padding: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  min-width: 140px;
 }
 
 .preview-record-info {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   width: 100%;
 }
 
 .preview-record-id {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
-  margin-bottom: 5px;
+  margin-bottom: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1659,25 +1781,25 @@ canvas {
 }
 
 .preview-record-time {
-  font-size: 11px;
+  font-size: 10px;
   color: #999;
 }
 
 .preview-record-canvas {
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
   background: white;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   display: block;
 }
 
 .download-btn {
-  padding: 6px 12px;
+  padding: 4px 10px;
   background: #3366ff;
   color: white;
   border: none;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: 3px;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.2s ease;
   width: 100%;
@@ -1685,7 +1807,7 @@ canvas {
 
 .download-btn:hover {
   background: #254edb;
-  box-shadow: 0 2px 4px rgba(51, 102, 255, 0.3);
+  box-shadow: 0 1px 3px rgba(51, 102, 255, 0.2);
 }
 
 .download-btn:active {

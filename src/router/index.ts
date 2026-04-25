@@ -1,8 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
-// 导入组件
 import ImagePuzzle from '../views/ImagePuzzle.vue';
-import AiContent from '../views/AiContent.vue';
+import Gallery from '../views/Gallery.vue';
 
 const routes = [
   {
@@ -11,9 +10,9 @@ const routes = [
     component: ImagePuzzle
   },
   {
-    path: '/ai-content',
-    name: 'AiContent',
-    component: AiContent
+    path: '/gallery',
+    name: 'Gallery',
+    component: Gallery
   }
 ];
 

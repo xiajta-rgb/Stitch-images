@@ -19,8 +19,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineEmits } from 'vue';
-
 // 组件事件
 const emit = defineEmits<{
   (e: 'export', format: 'jpg' | 'png', quality: 'original' | 'standard'): void;
@@ -34,47 +32,49 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
 
 <style scoped>
 .export-buttons-container {
-  margin-top: 20px;
-  padding: 15px;
+  margin-top: 12px;
+  padding: 10px;
   background: white;
   border-radius: 4px;
-  border: 1px solid #ddd;
+  border: 1px solid #e8e8e8;
 }
 
 .export-buttons-container h3 {
   margin-top: 0;
-  margin-bottom: 15px;
-  font-size: 16px;
-  color: #333;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
 }
 
 .export-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
 }
 
 .export-buttons button {
-  padding: 10px 16px;
-  border: 1px solid #ddd;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
   border-radius: 4px;
   background: white;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  gap: 4px;
+  font-size: 11px;
+  color: #666;
 }
 
 .export-buttons button:hover {
-  background: #f0f0f0;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: #f8f9fa;
+  border-color: #3366ff;
+  color: #3366ff;
 }
 
 .export-buttons .icon {
-  font-size: 16px;
+  font-size: 13px;
 }
 
 /* 响应式设计 */

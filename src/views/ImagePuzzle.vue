@@ -1,5 +1,5 @@
 <template>
-  <div class="app-container">
+  <div class="page-container">
     <!-- 右键菜单 -->
     <div 
       v-if="showContextMenu" 
@@ -13,97 +13,118 @@
       <div class="menu-item delete-item" @click="deleteImage">删除图片</div>
     </div>
     
-    <!-- 核心功能区 -->
-    <div class="main-content">
-      <!-- 左侧：图片拼图模块 -->
-      <div class="puzzle-module">
-        <h2>图片拼图</h2>
-        
-        <!-- 头部操作区域 -->
-        <div class="puzzle-header">
-          <!-- 模板选择 -->
-          <TemplateSelector 
-            :templates="templates"
-            :selectedTemplate="selectedTemplate"
-            @select="selectTemplate"
-          />
-          
-          <!-- 画布分辨率选择 -->
-          <div class="canvas-resolution">
-            <label>画布分辨率:</label>
-            <select 
-              v-model="selectedResolution"
-              @change="selectResolution"
-            >
-              <option 
-                v-for="res in resolutions" 
-                :key="res.id" 
-                :value="res.id"
-              >
-                {{ res.name }}
-              </option>
-            </select>
-          </div>
-          
-          <!-- 快速操作按钮 -->
-          <QuickActions 
-            @fileUpload="handleFileUpload"
-            @resetCanvas="resetCanvas"
-          />
-        </div>
-        
-        <!-- 画布容器 -->
-        <CanvasContainer 
-          ref="canvasContainerRef"
-          :canvasWidth="canvasWidth"
-          :canvasHeight="canvasHeight"
-          :canvasBackgroundColor="canvasBackgroundColor"
-          :showGrid="showGrid"
-          :selectedObject="selectedObject"
-          :uploadedImage="uploadedImage"
-          :imageInfo="imageInfo"
-          :gridConfig="currentGridConfig"
-          @updateBackgroundColor="updateCanvasBackground"
-          @toggleGrid="toggleGrid"
-          @canvasInitialized="handleCanvasInitialized"
-          @updateGridLineWidth="updateGridLineWidth"
-          @updateGridGap="updateGridGap"
-          @updateGridMargin="updateGridMargin"
-          @gridCellClick="handleGridCellClick"
-        />
-        
-        <!-- 隐藏的文件输入元素，用于分宫格上传 -->
-        <input 
-          type="file" 
-          id="grid-file-input" 
-          accept="image/*" 
-          style="display: none;"
-          @change="handleFileUpload"
-        />
-        
+    <!-- 头部操作区域 -->
+    <HeaderControls
+      :templates="templates"
+      :resolutions="resolutions"
+      :selectedTemplate="selectedTemplate"
+      :selectedResolution="selectedResolution"
+      :gridConfig="currentGridConfig"
+      @selectTemplate="selectTemplate"
+      @selectResolution="selectResolution"
+      @updateGridConfig="updateGridConfig"
+    />
 
-        
-        <!-- 导出按钮 -->
-        <ExportButtons 
-          @export="exportCanvas"
-        />
+    <!-- 画布容器 -->
+    <CanvasContainer
+      ref="canvasContainerRef"
+      :canvasWidth="canvasWidth"
+      :canvasHeight="canvasHeight"
+      :canvasBackgroundColor="canvasBackgroundColor"
+      :showGrid="showGrid"
+      :selectedObject="selectedObject"
+      :uploadedImage="uploadedImage"
+      :imageInfo="imageInfo"
+      :gridConfig="currentGridConfig"
+      @updateBackgroundColor="updateCanvasBackground"
+      @toggleGrid="toggleGrid"
+      @canvasInitialized="handleCanvasInitialized"
+      @updateGridLineWidth="updateGridLineWidth"
+      @updateGridGap="updateGridGap"
+      @updateGridMargin="updateGridMargin"
+      @gridCellClick="handleGridCellClick"
+      @export="exportCanvas"
+    />
+
+    <!-- 隐藏的文件输入元素，用于分宫格上传 -->
+    <input
+      type="file"
+      id="grid-file-input"
+      accept="image/*"
+      style="display: none;"
+      @change="handleFileUpload"
+    />
+
+    <!-- 图库选择弹窗 -->
+    <Transition name="modal-fade">
+      <div v-if="showGalleryModal" class="modal-overlay" @click.self="showGalleryModal = false">
+        <Transition name="modal-scale">
+          <div class="modal-content gallery-select-modal">
+            <div class="modal-header">
+              <h3>从图库选择图片</h3>
+              <button class="close-btn" @click="showGalleryModal = false">×</button>
+            </div>
+            <div class="gallery-search">
+              <input
+                v-model="gallerySearchKeyword"
+                type="text"
+                class="gallery-search-input"
+                placeholder="搜索标签或名称..."
+              />
+            </div>
+            <div class="gallery-list">
+              <Transition name="gallery-fade" mode="out-in">
+                <div v-if="filteredGalleryImages.length === 0" key="empty" class="empty-gallery">
+                  <div v-if="gallerySearchKeyword">没有找到匹配的图片</div>
+                  <div v-else>图库中暂无图片，请先在图库管理中添加</div>
+                </div>
+                <div v-else key="grid" class="gallery-grid">
+                  <div
+                    v-for="img in filteredGalleryImages"
+                    :key="img.id"
+                    class="gallery-item"
+                    :class="{ selected: selectedGalleryIds.includes(img.id) }"
+                    @click="toggleGallerySelect(img.id)"
+                  >
+                    <input type="checkbox" :checked="selectedGalleryIds.includes(img.id)" @click.stop />
+                    <div class="img-preview">
+                      <img v-if="getGalleryImgSrc(img)" :src="getGalleryImgSrc(img)" :alt="img.name" @error="handleGalleryImgError" />
+                      <div v-else class="img-placeholder">暂无图片</div>
+                    </div>
+                    <div class="img-tags" v-if="img.tags?.length">
+                      <span v-for="(tag, i) in img.tags.slice(0, 2)" :key="i" class="img-tag">{{ tag }}</span>
+                    </div>
+                    <div class="img-info">
+                      <span class="img-name">{{ img.name || '未命名' }}</span>
+                    </div>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+            <div class="modal-footer">
+              <span class="select-count">已选择 {{ selectedGalleryIds.length }} 张</span>
+              <button class="btn-cancel" @click="showGalleryModal = false">取消</button>
+              <button class="btn-confirm" @click="importFromGallery" :disabled="selectedGalleryIds.length === 0">导入</button>
+            </div>
+          </div>
+        </Transition>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, inject, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, watch, inject, nextTick, computed } from 'vue';
 
 // 注入全局预览记录状态
 const globalPreviewRecords = inject('previewRecords');
 const updateGlobalPreviewRecords = inject('updatePreviewRecords');
+const showToast = inject('showToast');
 
 // 导入组件
-import TemplateSelector from '../components/TemplateSelector.vue';
-import QuickActions from '../components/QuickActions.vue';
+import HeaderControls from '../components/HeaderControls.vue';
 import CanvasContainer from '../components/CanvasContainer.vue';
-import ExportButtons from '../components/ExportButtons.vue';
+import api from '../services/api';
 
 // 预设画布分辨率
 const resolutions = [
@@ -145,7 +166,7 @@ let selectedImage: any = null;
 const canvasContainerRef = ref<any>(null);
 
 // 当前宫格配置
-const currentGridConfig = ref({ rows: 3, cols: 1 });
+const currentGridConfig = ref({ rows: 3, cols: 1, gap: 20, margin: 20 });
 
 // 标志，用于确保initCanvas()函数只被调用一次
 let isCanvasInitialized = false;
@@ -170,6 +191,78 @@ let canvasElement: HTMLCanvasElement | null = null;
 
 // 当前选中的宫格索引，用于分宫格上传图片
 let currentGridIndex: number | null = null;
+
+// 图库导入相关
+const showGalleryModal = ref(false);
+const selectedGalleryIds = ref<string[]>([]);
+const galleryImages = computed(() => globalPreviewRecords?.value || []);
+const gallerySearchKeyword = ref('');
+const filteredGalleryImages = computed(() => {
+  const keyword = gallerySearchKeyword.value.toLowerCase().trim();
+  const hasValidImage = (img: any) => img.dataURL || img.sourceUrl;
+  if (!keyword) return galleryImages.value.filter(hasValidImage);
+  return galleryImages.value.filter(img => {
+    if (!hasValidImage(img)) return false;
+    const nameMatch = img.name?.toLowerCase().includes(keyword);
+    const tagMatch = Array.isArray(img.tags) && img.tags.some((tag: string) => tag.toLowerCase().includes(keyword));
+    return nameMatch || tagMatch;
+  });
+});
+const getGalleryImgSrc = (img: any) => img.dataURL || img.sourceUrl || '';
+
+const refreshGallery = async () => {
+  try {
+    const data = await api.getGallery();
+    if (updateGlobalPreviewRecords) {
+      updateGlobalPreviewRecords(data.map((item: any) => ({
+        ...item,
+        timestamp: new Date(item.timestamp)
+      })));
+    }
+  } catch (error) {
+    console.error('刷新图库数据失败:', error);
+  }
+};
+
+const handleGalleryImgError = (e: Event) => {
+  const img = e.target as HTMLImageElement;
+  img.style.display = 'none';
+  img.parentElement.querySelector('.img-placeholder')?.classList.add('show');
+};
+
+const toggleGallerySelect = (id: string) => {
+  const index = selectedGalleryIds.value.indexOf(id);
+  if (index > -1) {
+    selectedGalleryIds.value.splice(index, 1);
+  } else {
+    selectedGalleryIds.value.push(id);
+  }
+};
+
+const importFromGallery = () => {
+  const selectedImages = galleryImages.value.filter(img => selectedGalleryIds.value.includes(img.id));
+  if (selectedImages.length > 0) {
+    if (selectedImages.length === 1) {
+      uploadedImage.value = getGalleryImgSrc(selectedImages[0]);
+      imageInfo.value = {
+        name: selectedImages[0].name || 'gallery-image',
+        type: 'image/jpeg',
+        size: 0
+      };
+    } else {
+      selectedImages.forEach((img, index) => {
+        if (canvasContainerRef.value) {
+          canvasContainerRef.value.handleMultipleImages([{
+            dataURL: getGalleryImgSrc(img),
+            name: img.name || `gallery-image-${index}`
+          }]);
+        }
+      });
+    }
+  }
+  showGalleryModal.value = false;
+  selectedGalleryIds.value = [];
+};
 
 // 初始化画布
 const initCanvas = () => {
@@ -264,28 +357,47 @@ const drawGrid = () => {
 // 选择模板
 const selectTemplate = (template: any) => {
   selectedTemplate.value = template.id;
-  // 更新canvasWidth.value和canvasHeight.value为模板的width和height值，确保宫格系统正确显示
   canvasWidth.value = template.width;
   canvasHeight.value = template.height;
-  // 更新gridGap.value为模板的gap值，确保宫格系统正确显示
   gridGap.value = template.grid.gap;
-  // 更新currentGridConfig为模板的grid配置
+  gridMargin.value = template.grid.margin;
   currentGridConfig.value = {
     rows: template.grid.rows,
-    cols: template.grid.cols
+    cols: template.grid.cols,
+    gap: template.grid.gap,
+    margin: template.grid.margin
   };
-  // 重置画布尺寸和网格，确保canvasElement的尺寸已经更新
   resetCanvasSizeAndGrid();
+  if (showToast) {
+    showToast(`已切换到${template.name}模板`, 'success');
+  }
+};
+
+const updateGridConfig = (config: any) => {
+  currentGridConfig.value = {
+    rows: config.rows,
+    cols: config.cols,
+    gap: config.gap,
+    margin: config.margin || currentGridConfig.value.margin
+  };
+  gridGap.value = config.gap;
+  if (canvasContainerRef.value?.updateGridConfig) {
+    canvasContainerRef.value.updateGridConfig(currentGridConfig.value);
+  }
+  if (showToast) {
+    showToast(`宫格已调整为 ${config.rows}×${config.cols}`, 'success');
+  }
 };
 
 // 选择画布分辨率
-const selectResolution = () => {
-  const resolution = resolutions.find(r => r.id === selectedResolution.value);
-  if (resolution) {
-    canvasWidth.value = resolution.width;
-    canvasHeight.value = resolution.height;
-    // 重置画布尺寸和网格，确保canvasElement的尺寸已经更新
-    resetCanvasSizeAndGrid();
+const selectResolution = (resolution: any) => {
+  selectedResolution.value = resolution.id;
+  canvasWidth.value = resolution.width;
+  canvasHeight.value = resolution.height;
+  // 重置画布尺寸和网格，确保canvasElement的尺寸已经更新
+  resetCanvasSizeAndGrid();
+  if (showToast) {
+    showToast(`分辨率已设置为 ${resolution.width}×${resolution.height}`, 'success');
   }
 };
 
@@ -342,7 +454,9 @@ const handleFileUpload = (event: Event) => {
     const template = templates.find(t => t.id === selectedTemplate.value);
     if (!template) {
       console.error('未找到选中的模板');
-      alert('未找到选中的模板，请先选择模板');
+      if (showToast) {
+        showToast('未找到选中的模板，请先选择模板', 'warning');
+      }
       return;
     }
     
@@ -398,7 +512,9 @@ const handleFileUpload = (event: Event) => {
     // 检查是否有有效的图片文件
     if (validFiles.length === 0) {
       console.log('没有有效的图片文件');
-      alert('请选择图片文件');
+      if (showToast) {
+        showToast('请选择图片文件', 'warning');
+      }
       if (inputId === 'grid-file-input') {
         currentGridIndex = null; // 重置当前宫格索引
       }
@@ -465,7 +581,9 @@ const handleFileUpload = (event: Event) => {
       
       if (processFiles.length === 0) {
         console.log('没有有效的图片文件');
-        alert('请选择图片文件');
+        if (showToast) {
+          showToast('请选择图片文件', 'warning');
+        }
         return;
       }
       
@@ -538,7 +656,9 @@ const handleFileUpload = (event: Event) => {
     
   } catch (error) {
     console.error('处理文件上传时出错:', error);
-    alert('处理文件上传时出错，请重试');
+    if (showToast) {
+      showToast('处理文件上传时出错，请重试', 'error');
+    }
   }
 };
 
@@ -584,15 +704,14 @@ const handleCanvasInitialized = (canvas: HTMLCanvasElement) => {
 };
 
 // 处理宫格点击事件
-const handleGridCellClick = (row: number, col: number) => {
+const handleGridCellClick = async (row: number, col: number) => {
   console.log('宫格点击:', row, col);
   // 保存当前宫格索引
   currentGridIndex = row * currentGridConfig.value.cols + col;
-  // 触发文件选择
-  const fileInput = document.getElementById('grid-file-input') as HTMLInputElement;
-  if (fileInput) {
-    fileInput.click();
-  }
+  // 打开图库弹窗前先刷新数据并清空搜索
+  gallerySearchKeyword.value = '';
+  await refreshGallery();
+  showGalleryModal.value = true;
 };
 
 // 更新画布背景色
@@ -704,12 +823,16 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
       })
       .catch(error => {
         console.error('下载文件时出错:', error);
-        alert('下载文件时出错，请重试');
+        if (showToast) {
+          showToast('下载文件时出错，请重试', 'error');
+        }
       });
     
   } catch (error) {
     console.error('导出画布时出错:', error);
-    alert('导出画布时出错，请重试');
+    if (showToast) {
+      showToast('导出画布时出错，请重试', 'error');
+    }
   }
 };
 
@@ -784,95 +907,15 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.app-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  font-family: Arial, sans-serif;
-}
-
-.main-content {
+.page-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  overflow: auto;
+  gap: 12px;
 }
 
-.puzzle-module {
-  background: #ffffff;
-  padding: 24px;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  overflow: auto;
-  height: auto;
-  max-height: none;
-  border: 1px solid #e0e0e0;
-}
-
-/* 头部区域 - 包含模板选择、分辨率和快速操作 */
-.puzzle-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-/* 画布分辨率选择样式 */
-.canvas-resolution {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 0;
-  padding: 8px 12px;
-  background: #fafafa;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-}
-
-.canvas-resolution label {
-  font-weight: 500;
-  color: #666;
-  font-size: 14px;
-}
-
-.canvas-resolution select {
-  padding: 6px 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: white;
-  font-size: 14px;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.2s ease;
-  min-width: 150px;
-}
-
-.canvas-resolution select:hover {
-  border-color: #3366ff;
-}
-
-.canvas-resolution select:focus {
-  border-color: #3366ff;
-  box-shadow: 0 0 0 2px rgba(51, 102, 255, 0.1);
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .puzzle-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .canvas-resolution {
-    justify-content: space-between;
-  }
-  
-  .canvas-resolution select {
-    min-width: auto;
-  }
+/* 快速操作按钮区域 */
+.quick-actions-bar {
+  margin-top: 10px;
 }
 
 /* 右键菜单样式 */
@@ -917,5 +960,292 @@ onUnmounted(() => {
 .delete-item:hover {
   background: #fff2f0;
   color: #ff7875;
+}
+
+/* 图库选择弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.gallery-select-modal {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.gallery-search {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.gallery-search-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.gallery-search-input:focus {
+  outline: none;
+  border-color: #3366ff;
+  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+}
+
+.gallery-search-input::placeholder {
+  color: #bbb;
+}
+
+.gallery-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  min-height: 300px;
+}
+
+.empty-gallery {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.gallery-item {
+  position: relative;
+  border: 2px solid #eee;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+}
+
+.gallery-item:hover {
+  border-color: #3366ff;
+}
+
+.gallery-item.selected {
+  border-color: #3366ff;
+  background: #f0f5ff;
+}
+
+.gallery-item input[type="checkbox"] {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+}
+
+.gallery-item .img-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+}
+
+.gallery-item .img-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gallery-item .img-placeholder {
+  display: none;
+  color: #ccc;
+  font-size: 12px;
+  text-align: center;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-item .img-placeholder.show {
+  display: flex;
+}
+
+.gallery-item .img-tags {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  max-width: 80%;
+  justify-content: flex-end;
+}
+
+.gallery-item .img-tag {
+  background: rgba(51, 102, 255, 0.85);
+  color: white;
+  font-size: 9px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  max-width: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-item .img-info {
+  padding: 6px 8px;
+  background: white;
+  border-top: 1px solid #eee;
+}
+
+.gallery-item .img-name {
+  display: block;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid #eee;
+  background: #fafafa;
+  border-radius: 0 0 8px 8px;
+}
+
+.select-count {
+  margin-right: auto;
+  color: #666;
+  font-size: 13px;
+}
+
+.modal-footer button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.btn-cancel:hover {
+  background: #e0e0e0;
+}
+
+.btn-confirm {
+  background: #3366ff;
+  color: white;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: #254edb;
+}
+
+.btn-confirm:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+/* 弹窗过渡效果 */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+.modal-scale-enter-active {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.modal-scale-leave-active {
+  transition: all 0.2s ease;
+}
+
+.modal-scale-enter-from {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.modal-scale-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.gallery-fade-enter-active,
+.gallery-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.gallery-fade-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.gallery-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>
