@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide } from 'vue';
+import { ref } from 'vue';
 
 interface Toast {
   id: number;
@@ -47,7 +47,7 @@ const getIcon = (type: Toast['type']) => {
   return icons[type] || icons.info;
 };
 
-provide('showToast', showToast);
+defineExpose({ showToast });
 </script>
 
 <style scoped>

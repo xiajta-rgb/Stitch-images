@@ -261,7 +261,8 @@
 
     <BatchImportModal
       ref="batchImportModalRef"
-      @confirm="handleBatchImportConfirm"
+      :galleryImages="records"
+      @confirmFromUrl="handleBatchImportConfirm"
     />
   </div>
 </template>
@@ -495,7 +496,7 @@ const openBatchImportModal = () => {
   batchImportModalRef.value?.open();
 };
 
-const handleBatchImportConfirm = async (data: { urls: string; tags: string[] }) => {
+const handleBatchImportConfirm = async (data: { urls: string }) => {
   const lines = data.urls.split('\n').map(line => line.trim()).filter(line => line);
   if (lines.length === 0) {
     if (showToast) showToast('请输入至少一个URL', 'warning');
@@ -511,7 +512,7 @@ const handleBatchImportConfirm = async (data: { urls: string; tags: string[] }) 
         sourceUrl: url,
         dataURL: url,
         name: extractFileName(url),
-        tags: [...data.tags]
+        tags: []
       });
       successCount++;
     } catch (error) {

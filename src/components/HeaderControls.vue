@@ -40,6 +40,20 @@
     <div class="control-divider"></div>
 
     <div class="control-section">
+      <div class="section-label">自定义模板</div>
+      <div class="custom-template-actions">
+        <select class="custom-template-select" @change="onCustomTemplateChange">
+          <option value="">选择已保存的模板...</option>
+          <option v-for="t in customTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
+        <button class="btn-save-template" @click="saveTemplate" title="保存当前配置为模板">💾 保存</button>
+        <button class="btn-manage-templates" @click="manageTemplates" title="管理模板">⚙️ 管理</button>
+      </div>
+    </div>
+
+    <div class="control-divider"></div>
+
+    <div class="control-section">
       <div class="section-label">分辨率</div>
       <div class="resolution-options">
         <button
@@ -75,6 +89,7 @@
             <span class="stepper-value">{{ currentGridConfig.cols }}</span>
             <button @click="adjustCols(1)" :disabled="currentGridConfig.cols >= 6">+</button>
           </div>
+          <button class="btn-batch-import" @click="openBatchImport" title="批量导入图片到图库">📥 批量导入</button>
         </div>
       </div>
     </div>
@@ -83,6 +98,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
+import { useTemplateManager, type PuzzleTemplate } from '../composables/useTemplateManager';
 
 interface Template {
   id: string;
@@ -118,7 +134,13 @@ const emit = defineEmits<{
   (e: 'selectTemplate', template: Template): void;
   (e: 'selectResolution', resolution: Resolution): void;
   (e: 'updateGridConfig', config: GridConfig): void;
+  (e: 'saveTemplate'): void;
+  (e: 'openTemplateManager'): void;
+  (e: 'applyCustomTemplate', template: PuzzleTemplate): void;
+  (e: 'openBatchImport'): void;
 }>();
+
+const { templates: customTemplates } = useTemplateManager();
 
 const selectedTemplate = ref(props.selectedTemplate);
 const selectedResolution = ref(props.selectedResolution);
@@ -149,6 +171,30 @@ const adjustCols = (delta: number) => {
   const newCols = Math.max(1, Math.min(6, currentGridConfig.value.cols + delta));
   currentGridConfig.value.cols = newCols;
   emit('updateGridConfig', { ...currentGridConfig.value });
+};
+
+const onCustomTemplateChange = (e: Event) => {
+  const target = e.target as HTMLSelectElement;
+  const templateId = target.value;
+  if (!templateId) return;
+  
+  const template = customTemplates.value.find(t => t.id === templateId);
+  if (template) {
+    emit('applyCustomTemplate', template);
+  }
+  target.value = '';
+};
+
+const saveTemplate = () => {
+  emit('saveTemplate');
+};
+
+const manageTemplates = () => {
+  emit('openTemplateManager');
+};
+
+const openBatchImport = () => {
+  emit('openBatchImport');
 };
 </script>
 
@@ -320,6 +366,65 @@ const adjustCols = (delta: number) => {
   font-size: 11px;
   font-weight: 500;
   color: #333;
+}
+
+.custom-template-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.custom-template-select {
+  padding: 4px 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  font-size: 11px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.custom-template-select:focus {
+  outline: none;
+  border-color: #3366ff;
+}
+
+.btn-save-template,
+.btn-manage-templates {
+  padding: 4px 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  font-size: 11px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-save-template:hover,
+.btn-manage-templates:hover {
+  border-color: #3366ff;
+  color: #3366ff;
+  background: #f0f5ff;
+}
+
+.btn-batch-import {
+  padding: 4px 10px;
+  border: 1px solid #3366ff;
+  border-radius: 4px;
+  font-size: 11px;
+  background: #3366ff;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-batch-import:hover {
+  background: #254edb;
+  border-color: #254edb;
 }
 
 

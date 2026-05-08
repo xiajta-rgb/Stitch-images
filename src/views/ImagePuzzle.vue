@@ -23,6 +23,10 @@
       @selectTemplate="selectTemplate"
       @selectResolution="selectResolution"
       @updateGridConfig="updateGridConfig"
+      @saveTemplate="saveCurrentAsTemplate"
+      @openTemplateManager="openTemplateManager"
+      @applyCustomTemplate="handleApplyTemplate"
+      @openBatchImport="openBatchImport"
     />
 
     <!-- 画布容器 -->
@@ -42,6 +46,7 @@
       @updateGridGap="updateGridGap"
       @updateGridMargin="updateGridMargin"
       @gridCellClick="handleGridCellClick"
+      @cellImageDeleted="handleCellImageDeleted"
       @export="exportCanvas"
     />
 
@@ -112,6 +117,59 @@
         </Transition>
       </div>
     </Transition>
+
+    <!-- 模板管理弹窗 -->
+    <TemplateManagerModal
+      ref="templateManagerRef"
+      @apply="handleApplyTemplate"
+      @delete="handleDeleteTemplate"
+    />
+
+    <!-- 批量导入弹窗 -->
+    <BatchImportModal
+      ref="batchImportModalRef"
+      :maxCount="currentGridConfig.rows * currentGridConfig.cols"
+      :galleryImages="galleryImages"
+      @confirmFromGallery="handleBatchImportFromGallery"
+      @confirmFromUrl="handleBatchImportFromUrl"
+    />
+
+    <!-- 保存模板弹窗 -->
+    <Transition name="modal-fade">
+      <div v-if="showSaveTemplateModal" class="modal-overlay" @click.self="cancelSaveTemplate">
+        <Transition name="modal-scale">
+          <div class="modal-content save-template-modal">
+            <div class="modal-header">
+              <h3>保存为模板</h3>
+              <button class="close-btn" @click="cancelSaveTemplate">×</button>
+            </div>
+            <div class="save-template-body">
+              <div class="form-group">
+                <label>模板名称</label>
+                <input
+                  v-model="saveTemplateName"
+                  type="text"
+                  class="form-input"
+                  placeholder="请输入模板名称"
+                  @keyup.enter="confirmSaveTemplate"
+                  autofocus
+                />
+              </div>
+              <div class="template-preview">
+                <span>画布: {{ canvasWidth }}×{{ canvasHeight }}</span>
+                <span>宫格: {{ currentGridConfig.rows }}行{{ currentGridConfig.cols }}列</span>
+                <span>间距: {{ gridGap }}px</span>
+                <span>边距: {{ gridMargin }}px</span>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-action btn-cancel" @click="cancelSaveTemplate">取消</button>
+              <button class="btn-action btn-primary" @click="confirmSaveTemplate" :disabled="!saveTemplateName.trim()">保存</button>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -127,7 +185,10 @@ const showToast = inject<ShowToastFunction>('showToast');
 // 导入组件
 import HeaderControls from '../components/HeaderControls.vue';
 import CanvasContainer from '../components/CanvasContainer.vue';
+import TemplateManagerModal from '../components/TemplateManagerModal.vue';
+import BatchImportModal from '../components/BatchImportModal.vue';
 import api from '../services/api';
+import { useTemplateManager, type PuzzleTemplate } from '../composables/useTemplateManager';
 
 // 预设画布分辨率
 const resolutions = [
@@ -144,6 +205,11 @@ const templates = [
   { id: '4-grid', name: '4宫格', width: 600, height: 600, grid: { rows: 2, cols: 2, gap: 20, margin: 20 } },
   { id: 'long', name: '长图', width: 600, height: 1200, grid: { rows: 4, cols: 1, gap: 20, margin: 20 } }
 ];
+
+// 模板管理
+const { addTemplate } = useTemplateManager();
+const templateManagerRef = ref<InstanceType<typeof TemplateManagerModal> | null>(null);
+const batchImportModalRef = ref<InstanceType<typeof BatchImportModal> | null>(null);
 
 // 响应式数据 - 选中的分辨率
 const selectedResolution = ref('rect-600-800');
@@ -378,6 +444,172 @@ const selectTemplate = (template: any) => {
   }
 };
 
+// 应用自定义模板
+const handleApplyTemplate = (template: PuzzleTemplate) => {
+  selectedTemplate.value = template.id;
+  canvasWidth.value = template.width;
+  canvasHeight.value = template.height;
+  gridGap.value = template.grid.gap;
+  gridMargin.value = template.grid.margin;
+  if (template.gridLineWidth) {
+    gridLineWidth.value = template.gridLineWidth;
+  }
+  if (template.backgroundColor) {
+    canvasBackgroundColor.value = template.backgroundColor;
+  }
+  currentGridConfig.value = {
+    rows: template.grid.rows,
+    cols: template.grid.cols,
+    gap: template.grid.gap,
+    margin: template.grid.margin
+  };
+  resetCanvasSizeAndGrid();
+  if (showToast) {
+    showToast(`已应用模板: ${template.name}`, 'success');
+  }
+};
+
+// 保存当前配置为模板
+const showSaveTemplateModal = ref(false);
+const saveTemplateName = ref('');
+
+const saveCurrentAsTemplate = () => {
+  showSaveTemplateModal.value = true;
+  saveTemplateName.value = '';
+};
+
+const confirmSaveTemplate = () => {
+  const name = saveTemplateName.value.trim();
+  if (!name) {
+    if (showToast) {
+      showToast('请输入模板名称', 'warning');
+    }
+    return;
+  }
+  
+  addTemplate({
+    name,
+    width: canvasWidth.value,
+    height: canvasHeight.value,
+    grid: {
+      rows: currentGridConfig.value.rows,
+      cols: currentGridConfig.value.cols,
+      gap: gridGap.value,
+      margin: gridMargin.value
+    },
+    gridLineWidth: gridLineWidth.value,
+    backgroundColor: canvasBackgroundColor.value
+  });
+  
+  showSaveTemplateModal.value = false;
+  saveTemplateName.value = '';
+  
+  if (showToast) {
+    showToast(`模板 "${name}" 已保存`, 'success');
+  }
+};
+
+const cancelSaveTemplate = () => {
+  showSaveTemplateModal.value = false;
+  saveTemplateName.value = '';
+};
+
+// 打开模板管理
+const openTemplateManager = () => {
+  templateManagerRef.value?.open();
+};
+
+// 删除模板
+const handleDeleteTemplate = (name: string) => {
+  if (showToast && name) {
+    showToast(`模板 "${name}" 已删除`, 'success');
+  }
+};
+
+// 打开批量导入
+const openBatchImport = () => {
+  refreshGallery();
+  batchImportModalRef.value?.open();
+};
+
+// 从图库批量导入
+const handleBatchImportFromGallery = (ids: string[]) => {
+  const selectedImages = galleryImages.value.filter(img => ids.includes(img.id));
+  if (selectedImages.length === 0) {
+    batchImportModalRef.value?.closeModal();
+    return;
+  }
+
+  const rows = currentGridConfig.value.rows;
+  const cols = currentGridConfig.value.cols;
+  const totalCells = rows * cols;
+  let cellIndex = 0;
+
+  selectedImages.forEach((img) => {
+    if (cellIndex >= totalCells) return;
+    const row = Math.floor(cellIndex / cols);
+    const col = cellIndex % cols;
+    const dataURL = getGalleryImgSrc(img);
+    if (dataURL) {
+      drawImageToCellCanvas(row, col, dataURL);
+    }
+    cellIndex++;
+  });
+
+  batchImportModalRef.value?.closeModal();
+  if (showToast) {
+    showToast(`已导入 ${Math.min(selectedImages.length, totalCells)} 张图片到宫格`, 'success');
+  }
+};
+
+// 从URL批量导入
+const handleBatchImportFromUrl = async (data: { urls: string }) => {
+  const urlList = data.urls.split('\n').map(u => u.trim()).filter(u => u);
+  if (urlList.length === 0) {
+    if (showToast) showToast('请输入至少一个URL', 'warning');
+    batchImportModalRef.value?.closeModal();
+    return;
+  }
+
+  const maxImages = currentGridConfig.value.rows * currentGridConfig.value.cols;
+  const urlsToImport = urlList.slice(0, maxImages);
+
+  if (showToast) {
+    showToast(`正在导入 ${urlsToImport.length} 张图片...`, 'info');
+  }
+
+  const cols = currentGridConfig.value.cols;
+  let cellIndex = 0;
+  let importCount = 0;
+
+  for (const url of urlsToImport) {
+    if (cellIndex >= maxImages) break;
+    const row = Math.floor(cellIndex / cols);
+    const col = cellIndex % cols;
+    drawImageToCellCanvas(row, col, url);
+    cellIndex++;
+    importCount++;
+
+    try {
+      await api.addGallery({
+        sourceUrl: url,
+        dataURL: url,
+        name: url.split('/').pop()?.split('?')[0] || '未命名图片',
+        tags: []
+      });
+    } catch (error) {
+      console.error(`保存到图库失败 ${url}:`, error);
+    }
+  }
+
+  batchImportModalRef.value?.closeModal();
+
+  if (importCount > 0) {
+    await refreshGallery();
+    if (showToast) showToast(`已导入 ${importCount} 张图片到宫格`, 'success');
+  }
+};
+
 const updateGridConfig = (config: any) => {
   currentGridConfig.value = {
     rows: config.rows,
@@ -590,10 +822,16 @@ const handleCanvasInitialized = (canvas: HTMLCanvasElement) => {
 // 处理宫格点击事件
 const handleGridCellClick = async (row: number, col: number) => {
   currentGridIndex = row * currentGridConfig.value.cols + col;
-  // 打开图库弹窗前先刷新数据并清空搜索
   gallerySearchKeyword.value = '';
   await refreshGallery();
   showGalleryModal.value = true;
+};
+
+// 处理宫格图片删除事件
+const handleCellImageDeleted = (row: number, col: number) => {
+  if (showToast) {
+    showToast(`已删除第 ${row + 1} 行第 ${col + 1} 列的图片`, 'success');
+  }
 };
 
 // 更新画布背景色
@@ -1153,5 +1391,66 @@ onUnmounted(() => {
 .gallery-fade-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* 保存模板弹窗样式 */
+.save-template-modal {
+  max-width: 450px;
+  background: #fff;
+}
+
+.save-template-modal .modal-header {
+  background: #fff;
+}
+
+.save-template-modal .modal-footer {
+  background: #fff;
+}
+
+.save-template-body {
+  padding: 20px;
+  background: #fff;
+}
+
+.save-template-body .form-group {
+  margin-bottom: 16px;
+}
+
+.save-template-body .form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.save-template-body .form-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.save-template-body .form-input:focus {
+  outline: none;
+  border-color: #3366ff;
+}
+
+.template-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: #f8f8f8;
+  border-radius: 6px;
+}
+
+.template-preview span {
+  font-size: 12px;
+  color: #666;
+  background: #e8e8e8;
+  padding: 4px 10px;
+  border-radius: 4px;
 }
 </style>

@@ -1,7 +1,7 @@
 <template>
   <div class="app-wrapper">
     <!-- Toast 提示 -->
-    <Toast />
+    <Toast ref="toastRef" />
     <!-- 确认对话框 -->
     <ConfirmDialog ref="confirmDialogRef" />
     <!-- 导航菜单 -->
@@ -23,6 +23,15 @@ import { PreviewRecord } from './types';
 import api from './services/api';
 
 const confirmDialogRef = ref<any>(null);
+const toastRef = ref<any>(null);
+
+const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+  if (toastRef.value) {
+    toastRef.value.showToast(message, type);
+  }
+};
+
+provide('showToast', showToast);
 
 const openConfirm = (
   message: string,
