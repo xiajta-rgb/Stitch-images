@@ -286,7 +286,6 @@ const refreshGallery = async () => {
       })));
     }
   } catch (error) {
-    console.error('刷新图库数据失败:', error);
   }
 };
 
@@ -365,7 +364,6 @@ const initCanvas = () => {
   try {
     isCanvasInitialized = true;
   } catch (error) {
-    console.error('初始化画布失败:', error);
   }
 };
 
@@ -375,49 +373,6 @@ const drawImageToCellCanvas = (row: number, col: number, dataURL: string) => {
   if (canvasContainerRef.value) {
     canvasContainerRef.value.drawImageToCell(row, col, dataURL);
   } else {
-    console.error('CanvasContainer组件未初始化');
-    // 降级处理：直接操作DOM
-    const gridCanvasContainer = document.querySelector('.grid-canvas-container');
-    if (!gridCanvasContainer) {
-      console.error('未找到 gridCanvasContainer 元素');
-      return;
-    }
-    
-    // 获取对应的宫格canvas
-    const cellCanvas = gridCanvasContainer.querySelector(`#cell-canvas-${row}-${col}`) as HTMLCanvasElement;
-    if (!cellCanvas) {
-      console.error(`未找到对应的宫格canvas: cell-canvas-${row}-${col}`);
-      return;
-    }
-    
-    // 创建图片对象
-    const imgElement = new Image();
-    imgElement.onload = function() {
-      const ctx = cellCanvas.getContext('2d');
-      if (!ctx) {
-        console.error('无法获取canvas上下文');
-        return;
-      }
-
-      ctx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
-
-      const imgWidth = imgElement.width;
-      const imgHeight = imgElement.height;
-      const scale = Math.max(cellCanvas.width / imgWidth, cellCanvas.height / imgHeight);
-
-      const drawWidth = imgWidth * scale;
-      const drawHeight = imgHeight * scale;
-      const offsetX = (cellCanvas.width - drawWidth) / 2;
-      const offsetY = (cellCanvas.height - drawHeight) / 2;
-
-      ctx.drawImage(imgElement, offsetX, offsetY, drawWidth, drawHeight);
-    };
-    
-    imgElement.onerror = function(err) {
-      console.error('HTML图片元素加载失败:', err);
-    };
-    
-    imgElement.src = dataURL;
   }
 };
 
@@ -598,7 +553,6 @@ const handleBatchImportFromUrl = async (data: { urls: string }) => {
         tags: []
       });
     } catch (error) {
-      console.error(`保存到图库失败 ${url}:`, error);
     }
   }
 
@@ -671,7 +625,6 @@ const handleFileUpload = (event: Event) => {
     // 获取当前选中的模板
     const template = templates.find(t => t.id === selectedTemplate.value);
     if (!template) {
-      console.error('未找到选中的模板');
       if (showToast) {
         showToast('未找到选中的模板，请先选择模板', 'warning');
       }
@@ -727,8 +680,7 @@ const handleFileUpload = (event: Event) => {
         }
       };
       
-      reader.onerror = function(err) {
-        console.error('文件读取失败:', err);
+      reader.onerror = function(_err) {
         currentGridIndex = null; // 重置当前宫格索引
         
         // 清除input的value，以便下次选择同一个文件时能触发change事件
@@ -788,8 +740,7 @@ const handleFileUpload = (event: Event) => {
           drawImageToCellCanvas(row, col, dataURL);
         };
         
-        reader.onerror = function(err) {
-          console.error('文件读取失败:', err);
+        reader.onerror = function(_err) {
         };
         
         reader.readAsDataURL(file);
@@ -799,7 +750,6 @@ const handleFileUpload = (event: Event) => {
     }
 
   } catch (error) {
-    console.error('处理文件上传时出错:', error);
     if (showToast) {
       showToast('处理文件上传时出错，请重试', 'error');
     }
@@ -937,15 +887,13 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       })
-      .catch(error => {
-        console.error('下载文件时出错:', error);
+      .catch(_error => {
         if (showToast) {
           showToast('下载文件时出错，请重试', 'error');
         }
       });
     
   } catch (error) {
-    console.error('导出画布时出错:', error);
     if (showToast) {
       showToast('导出画布时出错，请重试', 'error');
     }

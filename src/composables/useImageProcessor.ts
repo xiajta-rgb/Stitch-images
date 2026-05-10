@@ -35,12 +35,10 @@ export function useImageProcessor() {
             resolve(url)
           }
         } catch (e) {
-          console.warn('图片转换失败，使用原URL:', e)
           resolve(url)
         }
       }
       img.onerror = () => {
-        console.warn('图片加载失败，该图片无法访问:', url)
         resolve('')
       }
       img.src = url

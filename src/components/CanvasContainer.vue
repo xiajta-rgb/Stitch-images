@@ -69,16 +69,19 @@
       </label>
     </div>
     
-    <!-- 主Canvas元素作为背景 -->
-    <canvas
-      ref="canvas"
-      :width="props.canvasWidth"
-      :height="props.canvasHeight"
-      style="position: relative; z-index: 1;"
-    ></canvas>
-    
-    <!-- 宫格容器，用于放置独立的宫格Canvas -->
-    <div class="grid-canvas-container" ref="gridCanvasContainer" style="position: absolute; top: 0; left: 0; z-index: 2;"></div>
+    <!-- 画布和宫格容器包裹层 -->
+    <div class="canvas-wrapper" style="position: relative; display: inline-block;">
+      <!-- 主Canvas元素作为背景 -->
+      <canvas
+        ref="canvas"
+        :width="props.canvasWidth"
+        :height="props.canvasHeight"
+        style="position: relative; z-index: 1; display: block;"
+      ></canvas>
+      
+      <!-- 宫格容器，用于放置独立的宫格Canvas -->
+      <div class="grid-canvas-container" ref="gridCanvasContainer" style="position: absolute; top: 0; left: 0; z-index: 2;"></div>
+    </div>
     
     <!-- 导出预览 -->
     <div class="export-preview">
@@ -268,7 +271,6 @@ const cellCanvases: HTMLCanvasElement[][] = [];
 // 初始化画布
 const initCanvas = async () => {
   if (!canvas.value || !canvasContainer.value || !gridCanvasContainer.value) {
-    console.error('canvas元素或容器不存在');
     return;
   }
 
@@ -294,9 +296,9 @@ const initCanvas = async () => {
     gridCanvasContainer.value.style.width = `${props.canvasWidth}px`;
     gridCanvasContainer.value.style.height = `${props.canvasHeight}px`;
     gridCanvasContainer.value.style.position = 'absolute';
-    // 使用canvas的实际offsetTop和offsetLeft来定位，确保宫格容器与canvas完全重叠
-    gridCanvasContainer.value.style.top = `${canvas.value.offsetTop}px`;
-    gridCanvasContainer.value.style.left = `${canvas.value.offsetLeft}px`;
+    // 直接定位在容器顶部，避免使用offsetTop/offsetLeft导致的初始定位问题
+    gridCanvasContainer.value.style.top = '0';
+    gridCanvasContainer.value.style.left = '0';
 
     // 5. 绘制画布背景
     drawCanvasBackground();
@@ -315,7 +317,6 @@ const initCanvas = async () => {
     emit('canvasInitialized', { canvas: canvas.value, ctx });
     
   } catch (error) {
-    console.error('初始化画布失败:', error);
   }
 };
 
@@ -332,6 +333,259 @@ const deleteCellImage = (row: number, col: number) => {
   clearComposedImageState(row, col);
   drawGridSystem();
   emit('cellImageDeleted', row, col);
+};
+
+// 为指定宫格创建编辑容器和控制点
+const setupCellInteraction = (row: number, col: number, cellContainer: HTMLElement, cellCanvas: HTMLCanvasElement, _cellWidth: number, _cellHeight: number) => {
+  if (cellContainer.querySelector('.edit-container')) return;
+  
+  const editContainer = document.createElement('div');
+  editContainer.className = 'edit-container';
+  editContainer.style.position = 'absolute';
+  editContainer.style.left = '0';
+  editContainer.style.top = '0';
+  editContainer.style.width = '100%';
+  editContainer.style.height = '100%';
+  editContainer.style.pointerEvents = 'none';
+  
+  const currentRow = row;
+  const currentCol = col;
+  
+  const updateControlPoints = () => {
+    const imageState = cellImages.value[currentRow][currentCol];
+    if (!imageState) return;
+    
+    const canvas = cellCanvases[currentRow][currentCol];
+    if (!canvas) return;
+    
+    const imgWidth = imageState.width;
+    const imgHeight = imageState.height;
+    const drawWidth = imgWidth * imageState.scale;
+    const drawHeight = imgHeight * imageState.scale;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    const corners = [
+      { x: -drawWidth / 2 + imageState.x, y: -drawHeight / 2 + imageState.y },
+      { x: drawWidth / 2 + imageState.x, y: -drawHeight / 2 + imageState.y },
+      { x: drawWidth / 2 + imageState.x, y: drawHeight / 2 + imageState.y },
+      { x: -drawWidth / 2 + imageState.x, y: drawHeight / 2 + imageState.y }
+    ];
+    
+    const rotation = imageState.rotation * Math.PI / 180;
+    const rotatedCorners = corners.map(corner => {
+      const rotatedX = corner.x * Math.cos(rotation) - corner.y * Math.sin(rotation);
+      const rotatedY = corner.x * Math.sin(rotation) + corner.y * Math.cos(rotation);
+      return { x: rotatedX + centerX, y: rotatedY + centerY };
+    });
+    
+    const cornerPoints = editContainer.querySelectorAll('.corner-point');
+    cornerPoints.forEach((point, index) => {
+      if (rotatedCorners[index]) {
+        const cp = point as HTMLElement;
+        cp.style.left = `${rotatedCorners[index].x - 5}px`;
+        cp.style.top = `${rotatedCorners[index].y - 5}px`;
+      }
+    });
+    
+    const rotatePoint = editContainer.querySelector('.rotate-point') as HTMLElement;
+    if (rotatePoint) {
+      const topCorner = rotatedCorners[0];
+      const dx = topCorner.x - centerX;
+      const dy = topCorner.y - centerY;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const unitX = dx / length;
+      const unitY = dy / length;
+      const rotateX = centerX + unitX * (length + 20);
+      const rotateY = centerY + unitY * (length + 20);
+      rotatePoint.style.left = `${rotateX - 5}px`;
+      rotatePoint.style.top = `${rotateY - 5}px`;
+    }
+  };
+  
+  const cornerPointConfigs = [
+    { cursor: 'nwse-resize' },
+    { cursor: 'nesw-resize' },
+    { cursor: 'nwse-resize' },
+    { cursor: 'nesw-resize' }
+  ];
+  
+  cornerPointConfigs.forEach((pointInfo) => {
+    const controlPoint = document.createElement('div');
+    controlPoint.className = 'control-point corner-point';
+    controlPoint.style.position = 'absolute';
+    controlPoint.style.width = '10px';
+    controlPoint.style.height = '10px';
+    controlPoint.style.backgroundColor = '#3366ff';
+    controlPoint.style.border = '2px solid white';
+    controlPoint.style.borderRadius = '50%';
+    controlPoint.style.cursor = pointInfo.cursor;
+    controlPoint.style.zIndex = '5';
+    controlPoint.style.pointerEvents = 'auto';
+    controlPoint.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.2)';
+    
+    let isResizing = false;
+    let startScale = 1;
+    
+    controlPoint.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      isResizing = true;
+      const imageState = cellImages.value[currentRow][currentCol];
+      if (imageState) startScale = imageState.scale;
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const rect = cellContainer.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      const deltaX = Math.abs(currentX - cellCanvas.width / 2);
+      const deltaY = Math.abs(currentY - cellCanvas.height / 2);
+      const newScale = Math.max(0.1, Math.min(5, (deltaX + deltaY) / (cellCanvas.width + cellCanvas.height) * 4 * startScale));
+      const imageState = cellImages.value[currentRow][currentCol];
+      if (imageState) {
+        imageState.scale = newScale;
+        drawImageWithState(currentRow, currentCol, imageState);
+        updateControlPoints();
+      }
+    });
+    
+    document.addEventListener('mouseup', () => { isResizing = false; });
+    editContainer.appendChild(controlPoint);
+  });
+  
+  const rotatePoint = document.createElement('div');
+  rotatePoint.className = 'control-point rotate-point';
+  rotatePoint.style.position = 'absolute';
+  rotatePoint.style.width = '10px';
+  rotatePoint.style.height = '10px';
+  rotatePoint.style.backgroundColor = '#3366ff';
+  rotatePoint.style.border = '2px solid white';
+  rotatePoint.style.borderRadius = '50%';
+  rotatePoint.style.cursor = 'grabbing';
+  rotatePoint.style.zIndex = '5';
+  rotatePoint.style.pointerEvents = 'auto';
+  rotatePoint.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.2)';
+  
+  let isRotating = false;
+  let startAngle = 0;
+  
+  rotatePoint.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    isRotating = true;
+    const rect = cellContainer.getBoundingClientRect();
+    const centerX = rect.left + cellCanvas.width / 2;
+    const centerY = rect.top + cellCanvas.height / 2;
+    startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isRotating) return;
+    const rect = cellContainer.getBoundingClientRect();
+    const centerX = rect.left + cellCanvas.width / 2;
+    const centerY = rect.top + cellCanvas.height / 2;
+    const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+    const deltaAngle = currentAngle - startAngle;
+    const deltaDegrees = deltaAngle * (180 / Math.PI);
+    const imageState = cellImages.value[currentRow][currentCol];
+    if (imageState) {
+      imageState.rotation = (imageState.rotation + deltaDegrees) % 360;
+      drawImageWithState(currentRow, currentCol, imageState);
+      updateControlPoints();
+    }
+  });
+  
+  document.addEventListener('mouseup', () => { isRotating = false; });
+  editContainer.appendChild(rotatePoint);
+  
+  let isDragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  
+  cellCanvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    const rect = cellCanvas.getBoundingClientRect();
+    lastX = e.clientX - rect.left;
+    lastY = e.clientY - rect.top;
+    cellCanvas.style.cursor = 'grabbing';
+  });
+  
+  cellCanvas.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const rect = cellCanvas.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    const deltaX = currentX - lastX;
+    const deltaY = currentY - lastY;
+    const imageState = cellImages.value[currentRow][currentCol];
+    if (imageState) {
+      imageState.x += deltaX;
+      imageState.y += deltaY;
+      drawImageWithState(currentRow, currentCol, imageState);
+      updateControlPoints();
+    }
+    lastX = currentX;
+    lastY = currentY;
+  });
+  
+  cellCanvas.addEventListener('mouseup', () => {
+    isDragging = false;
+    cellCanvas.style.cursor = 'pointer';
+  });
+  
+  cellCanvas.addEventListener('mouseleave', () => {
+    isDragging = false;
+    cellCanvas.style.cursor = 'pointer';
+  });
+  
+  cellCanvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const imageState = cellImages.value[currentRow][currentCol];
+    if (!imageState) return;
+    const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.1, Math.min(5, imageState.scale * scaleFactor));
+    imageState.scale = newScale;
+    drawImageWithState(currentRow, currentCol, imageState);
+    updateControlPoints();
+  });
+  
+  cellCanvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const imageState = cellImages.value[currentRow][currentCol];
+    if (!imageState) return;
+    imageState.rotation = (imageState.rotation + 90) % 360;
+    drawImageWithState(currentRow, currentCol, imageState);
+    updateControlPoints();
+  });
+  
+  cellCanvas.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('.delete-btn')) return;
+    if (!cellImages.value[currentRow][currentCol]) {
+      handleCellClick(currentRow, currentCol);
+    }
+  });
+  
+  cellContainer.addEventListener('mouseover', () => {
+    cellContainer.style.border = `${gridLineWidth.value}px solid #666666`;
+    if (cellImages.value[currentRow][currentCol]) {
+      const deleteBtn = cellContainer.querySelector('.delete-btn') as HTMLElement;
+      if (deleteBtn) deleteBtn.style.display = 'block';
+    }
+  });
+  
+  cellContainer.addEventListener('mouseout', (e) => {
+    const relatedTarget = e.relatedTarget as Node;
+    if (cellContainer.contains(relatedTarget)) return;
+    cellContainer.style.border = `${gridLineWidth.value}px dashed #666`;
+    if (cellImages.value[currentRow][currentCol]) {
+      const deleteBtn = cellContainer.querySelector('.delete-btn') as HTMLElement;
+      if (deleteBtn) deleteBtn.style.display = 'none';
+    }
+  });
+  
+  cellContainer.appendChild(editContainer);
+  updateControlPoints();
 };
 
 // 绘制宫格系统
@@ -413,464 +667,17 @@ const drawGridSystem = () => {
         }
       }
       
-      // 添加图片交互功能
+      // 为有图片的宫格添加交互功能
       if (cellImages.value[row][col]) {
-        // 创建编辑容器，用于放置编辑点
-        const editContainer = document.createElement('div');
-        editContainer.className = 'edit-container';
-        editContainer.style.position = 'absolute';
-        editContainer.style.left = '0';
-        editContainer.style.top = '0';
-        editContainer.style.width = '100%';
-        editContainer.style.height = '100%';
-        editContainer.style.pointerEvents = 'none';
-        
-        // 保存当前的row和col，用于后续更新编辑点位置
-        const currentRow = row;
-        const currentCol = col;
-        
-        // 创建一个函数来更新编辑点位置
-        const updateControlPoints = () => {
-          const imageState = cellImages.value[currentRow][currentCol];
-          if (!imageState) return;
-          
-          // 获取canvas元素
-          const cellCanvas = cellCanvases[currentRow][currentCol];
-          if (!cellCanvas) return;
-          
-          // 直接使用imageState中保存的图片尺寸
-          const imgWidth = imageState.width;
-          const imgHeight = imageState.height;
-          const drawWidth = imgWidth * imageState.scale;
-          const drawHeight = imgHeight * imageState.scale;
-          const centerX = cellCanvas.width / 2;
-          const centerY = cellCanvas.height / 2;
-          
-          // 计算四个角点的位置
-          const corners = [
-            { x: -drawWidth / 2 + imageState.x, y: -drawHeight / 2 + imageState.y }, // 左上角
-            { x: drawWidth / 2 + imageState.x, y: -drawHeight / 2 + imageState.y }, // 右上角
-            { x: drawWidth / 2 + imageState.x, y: drawHeight / 2 + imageState.y }, // 右下角
-            { x: -drawWidth / 2 + imageState.x, y: drawHeight / 2 + imageState.y } // 左下角
-          ];
-          
-          // 应用旋转变换
-          const rotation = imageState.rotation * Math.PI / 180;
-          const rotatedCorners = corners.map(corner => {
-            const rotatedX = corner.x * Math.cos(rotation) - corner.y * Math.sin(rotation);
-            const rotatedY = corner.x * Math.sin(rotation) + corner.y * Math.cos(rotation);
-            return {
-              x: rotatedX + centerX,
-              y: rotatedY + centerY
-            };
-          });
-          
-          // 更新缩放控制点位置
-          const cornerPoints = editContainer.querySelectorAll('.corner-point');
-          cornerPoints.forEach((point, index) => {
-            if (rotatedCorners[index]) {
-              const cp = point as HTMLElement;
-              cp.style.left = `${rotatedCorners[index].x - 5}px`;
-              cp.style.top = `${rotatedCorners[index].y - 5}px`;
-            }
-          });
-          
-          // 更新旋转控制点位置
-          const rotatePoint = editContainer.querySelector('.rotate-point') as HTMLElement;
-          if (rotatePoint) {
-            const topCorner = rotatedCorners[0];
-            // 计算旋转控制点位置，位于图片顶部上方20px
-            const dx = topCorner.x - centerX;
-            const dy = topCorner.y - centerY;
-            const length = Math.sqrt(dx * dx + dy * dy);
-            const unitX = dx / length;
-            const unitY = dy / length;
-            const rotateX = centerX + unitX * (length + 20);
-            const rotateY = centerY + unitY * (length + 20);
-            rotatePoint.style.left = `${rotateX - 5}px`;
-            rotatePoint.style.top = `${rotateY - 5}px`;
-          }
-        };
-        
-        // 创建四个角的缩放控制点
-        const cornerPoints = [
-          { cursor: 'nwse-resize' }, // 左上角
-          { cursor: 'nesw-resize' }, // 右上角
-          { cursor: 'nwse-resize' }, // 右下角
-          { cursor: 'nesw-resize' } // 左下角
-        ];
-        
-        cornerPoints.forEach((pointInfo) => {
-          const controlPoint = document.createElement('div');
-          controlPoint.className = 'control-point corner-point';
-          controlPoint.style.position = 'absolute';
-          controlPoint.style.width = '10px';
-          controlPoint.style.height = '10px';
-          controlPoint.style.backgroundColor = '#3366ff';
-          controlPoint.style.border = '2px solid white';
-          controlPoint.style.borderRadius = '50%';
-          controlPoint.style.cursor = pointInfo.cursor;
-          controlPoint.style.zIndex = '5';
-          controlPoint.style.pointerEvents = 'auto';
-          controlPoint.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.2)';
-          
-          // 添加缩放功能
-          let isResizing = false;
-          let startScale = 1;
-          
-          controlPoint.addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-            isResizing = true;
-            const imageState = cellImages.value[currentRow][currentCol];
-            if (imageState) {
-              startScale = imageState.scale;
-            }
-          });
-          
-          document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            
-            const rect = cellContainer.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
-            
-            // 计算缩放比例
-            const deltaX = Math.abs(currentX - cellCanvas.width / 2);
-            const deltaY = Math.abs(currentY - cellCanvas.height / 2);
-            const newScale = Math.max(0.1, Math.min(5, (deltaX + deltaY) / (cellCanvas.width + cellCanvas.height) * 4 * startScale));
-            
-            // 更新图片缩放
-            const imageState = cellImages.value[currentRow][currentCol];
-            if (imageState) {
-              imageState.scale = newScale;
-              
-              // 重新绘制图片
-              drawImageWithState(currentRow, currentCol, imageState);
-              
-              // 更新所有编辑点位置
-              updateControlPoints();
-            }
-          });
-          
-          document.addEventListener('mouseup', () => {
-            isResizing = false;
-          });
-          
-          editContainer.appendChild(controlPoint);
-        });
-        
-        // 创建旋转控制点
-        const rotatePoint = document.createElement('div');
-        rotatePoint.className = 'control-point rotate-point';
-        rotatePoint.style.position = 'absolute';
-        rotatePoint.style.width = '10px';
-        rotatePoint.style.height = '10px';
-        rotatePoint.style.backgroundColor = '#3366ff';
-        rotatePoint.style.border = '2px solid white';
-        rotatePoint.style.borderRadius = '50%';
-        rotatePoint.style.cursor = 'grabbing';
-        rotatePoint.style.zIndex = '5';
-        rotatePoint.style.pointerEvents = 'auto';
-        rotatePoint.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.2)';
-        
-        // 添加旋转功能
-        let isRotating = false;
-        let startAngle = 0;
-        
-        rotatePoint.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          isRotating = true;
-          const rect = cellContainer.getBoundingClientRect();
-          const centerX = rect.left + cellCanvas.width / 2;
-          const centerY = rect.top + cellCanvas.height / 2;
-          const mouseX = e.clientX;
-          const mouseY = e.clientY;
-          startAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-          if (!isRotating) return;
-          
-          const rect = cellContainer.getBoundingClientRect();
-          const centerX = rect.left + cellCanvas.width / 2;
-          const centerY = rect.top + cellCanvas.height / 2;
-          const mouseX = e.clientX;
-          const mouseY = e.clientY;
-          const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
-          
-          // 计算旋转角度差
-          const deltaAngle = currentAngle - startAngle;
-          const deltaDegrees = deltaAngle * (180 / Math.PI);
-          
-          // 更新图片旋转
-          const imageState = cellImages.value[currentRow][currentCol];
-          if (imageState) {
-            imageState.rotation = (imageState.rotation + deltaDegrees) % 360;
-            
-            // 重新绘制图片
-            drawImageWithState(currentRow, currentCol, imageState);
-            
-            // 更新所有编辑点位置
-            updateControlPoints();
-          }
-        });
-        
-        document.addEventListener('mouseup', () => {
-          isRotating = false;
-        });
-        
-        editContainer.appendChild(rotatePoint);
-        
-        // 拖动功能（支持跨宫格拖拽）
-        let isDragging = false;
-        let isCrossCellDragging = false;
-        let lastX = 0;
-        let lastY = 0;
-        let dragSourceRow = row;
-        let dragSourceCol = col;
-        let dragHighlightContainer: HTMLElement | null = null;
-        
-        cellCanvas.addEventListener('mousedown', (e) => {
-          // 只响应左键拖拽
-          if (e.button !== 0) return;
-          isDragging = true;
-          isCrossCellDragging = false;
-          dragSourceRow = row;
-          dragSourceCol = col;
-          const rect = cellCanvas.getBoundingClientRect();
-          lastX = e.clientX - rect.left;
-          lastY = e.clientY - rect.top;
-          cellCanvas.style.cursor = 'grabbing';
-        });
-        
-        cellCanvas.addEventListener('mousemove', (e) => {
-          if (!isDragging) return;
-          
-          const rect = cellCanvas.getBoundingClientRect();
-          const currentX = e.clientX - rect.left;
-          const currentY = e.clientY - rect.top;
-          
-          // 计算总位移
-          const totalDeltaX = currentX - lastX;
-          const totalDeltaY = currentY - lastY;
-          
-          // 如果位移超过阈值，认为是跨宫格拖拽
-          if (!isCrossCellDragging && (Math.abs(totalDeltaX) > 10 || Math.abs(totalDeltaY) > 10)) {
-            isCrossCellDragging = true;
-            // 清除图片在当前宫格的显示
-            const cellCtx = cellCanvas.getContext('2d');
-            if (cellCtx) {
-              cellCtx.clearRect(0, 0, cellWidth, cellHeight);
-            }
-            // 添加全局事件监听，确保拖拽时即使鼠标移出源canvas也能正常工作
-            document.addEventListener('mousemove', handleGlobalMouseMove);
-            document.addEventListener('mouseup', handleGlobalMouseUp);
-          }
-          
-          if (isCrossCellDragging) {
-            // 移除之前的高亮
-            if (dragHighlightContainer) {
-              dragHighlightContainer.style.boxShadow = '';
-              dragHighlightContainer.style.backgroundColor = '';
-            }
-            
-            // 检测鼠标下方的宫格
-            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-            const cellBelow = elementBelow?.closest('[id^="cell-canvas-"]') as HTMLElement;
-            
-            if (cellBelow && cellBelow !== cellCanvas) {
-              // 解析目标宫格的行列
-              const match = cellBelow.id.match(/cell-canvas-(\d+)-(\d+)/);
-              if (match) {
-                // 高亮目标宫格
-                dragHighlightContainer = cellBelow.parentElement as HTMLElement;
-                if (dragHighlightContainer) {
-                  dragHighlightContainer.style.boxShadow = '0 0 0 3px #3366ff';
-                  dragHighlightContainer.style.backgroundColor = 'rgba(51, 102, 255, 0.1)';
-                }
-              }
-            } else {
-              dragHighlightContainer = null;
-            }
-            return;
-          }
-          
-          // 计算位移
-          const deltaX = currentX - lastX;
-          const deltaY = currentY - lastY;
-          
-          // 更新图片位置
-          const imageState = cellImages.value[row][col];
-          if (imageState) {
-            imageState.x += deltaX;
-            imageState.y += deltaY;
-            
-            // 重新绘制图片
-            drawImageWithState(row, col, imageState);
-            
-            // 更新所有编辑点位置
-            updateControlPoints();
-            
-            // 更新lastX和lastY
-            lastX = currentX;
-            lastY = currentY;
-          }
-        });
-        
-        cellCanvas.addEventListener('mouseup', (e) => {
-          handleDragEnd(e);
-        });
-        
-        cellCanvas.addEventListener('mouseleave', () => {
-          if (!isCrossCellDragging) {
-            isDragging = false;
-            cellCanvas.style.cursor = 'pointer';
-          }
-        });
-        
-        // 全局事件处理，确保拖拽时即使鼠标移出源canvas也能正常工作
-        const handleGlobalMouseMove = (e: MouseEvent) => {
-          if (!isCrossCellDragging || !isDragging) return;
-          
-          // 移除之前的高亮
-          if (dragHighlightContainer) {
-            dragHighlightContainer.style.boxShadow = '';
-            dragHighlightContainer.style.backgroundColor = '';
-          }
-          
-          // 检测鼠标下方的宫格
-          const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-          const cellBelow = elementBelow?.closest('[id^="cell-canvas-"]') as HTMLElement;
-          
-          if (cellBelow && cellBelow !== cellCanvas) {
-            // 高亮目标宫格
-            dragHighlightContainer = cellBelow.parentElement as HTMLElement;
-            if (dragHighlightContainer) {
-              dragHighlightContainer.style.boxShadow = '0 0 0 3px #3366ff';
-              dragHighlightContainer.style.backgroundColor = 'rgba(51, 102, 255, 0.1)';
-            }
-          } else {
-            dragHighlightContainer = null;
-          }
-        };
-        
-        const handleDragEnd = (e: MouseEvent) => {
-          if (isCrossCellDragging) {
-            // 处理跨宫格拖拽
-            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-            const cellBelow = elementBelow?.closest('[id^="cell-canvas-"]') as HTMLElement;
-            
-            if (cellBelow) {
-              const match = cellBelow.id.match(/cell-canvas-(\d+)-(\d+)/);
-              if (match) {
-                const targetRow = parseInt(match[1]);
-                const targetCol = parseInt(match[2]);
-                
-                // 检查目标宫格是否有图片
-                const targetImage = cellImages.value[targetRow]?.[targetCol];
-                const sourceImage = cellImages.value[dragSourceRow]?.[dragSourceCol];
-                
-                if (sourceImage) {
-                  // 交换或移动图片
-                  if (targetImage) {
-                    // 目标宫格有图片，交换
-                    cellImages.value[dragSourceRow][dragSourceCol] = targetImage;
-                    drawImageWithState(dragSourceRow, dragSourceCol, targetImage);
-                  } else {
-                    // 目标宫格没有图片，清除源宫格
-                    cellImages.value[dragSourceRow][dragSourceCol] = null;
-                    const sourceCtx = cellCanvases[dragSourceRow]?.[dragSourceCol]?.getContext('2d');
-                    if (sourceCtx) {
-                      sourceCtx.clearRect(0, 0, cellWidth, cellHeight);
-                    }
-                    // 显示上传提示
-                    drawUploadHint(dragSourceRow, dragSourceCol);
-                  }
-                  
-                  // 设置目标宫格的图片
-                  cellImages.value[targetRow][targetCol] = sourceImage;
-                  drawImageWithState(targetRow, targetCol, sourceImage);
-                  
-                  // 重新绘制宫格系统以更新编辑点等
-                  drawGridSystem();
-                }
-              }
-            }
-            
-            // 清除高亮
-            if (dragHighlightContainer) {
-              dragHighlightContainer.style.boxShadow = '';
-              dragHighlightContainer.style.backgroundColor = '';
-            }
-          }
-          
-          isDragging = false;
-          isCrossCellDragging = false;
-          cellCanvas.style.cursor = 'grab';
-          
-          // 移除全局事件监听
-          document.removeEventListener('mousemove', handleGlobalMouseMove);
-          document.removeEventListener('mouseup', handleGlobalMouseUp);
-        };
-        
-        const handleGlobalMouseUp = (e: MouseEvent) => {
-          handleDragEnd(e);
-        };
-        
-        // 滚轮缩放功能
-        cellCanvas.addEventListener('wheel', (e) => {
-          e.preventDefault();
-          
-          const imageState = cellImages.value[row][col];
-          if (!imageState) return;
-          
-          // 计算缩放比例
-          const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
-          const newScale = Math.max(0.1, Math.min(5, imageState.scale * scaleFactor));
-          
-          // 更新图片缩放
-          imageState.scale = newScale;
-          
-          // 重新绘制图片
-          drawImageWithState(row, col, imageState);
-          
-          // 更新所有编辑点位置
-          updateControlPoints();
-        });
-        
-        // 右键旋转功能
-        cellCanvas.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          
-          const imageState = cellImages.value[row][col];
-          if (!imageState) return;
-          
-          // 更新图片旋转
-          imageState.rotation = (imageState.rotation + 90) % 360;
-          
-          // 重新绘制图片
-          drawImageWithState(row, col, imageState);
-          
-          // 更新所有编辑点位置
-          updateControlPoints();
-        });
-        
-        // 添加到容器
-        cellContainer.appendChild(editContainer);
-        
-        // 初始更新编辑点位置
-        updateControlPoints();
+        setupCellInteraction(row, col, cellContainer, cellCanvas, cellWidth, cellHeight);
       }
       
       // 为所有宫格添加点击事件，但是只有没有图片时才触发上传
-      // 使用立即执行函数创建闭包，保存当前的row和col值
       (function(currentRow, currentCol) {
         cellCanvas.addEventListener('click', (e) => {
-          // 如果点击的是删除按钮，不触发图库导入
           if ((e.target as HTMLElement).closest('.delete-btn')) {
             return;
           }
-          // 只有没有图片时才触发上传
           if (!cellImages.value[currentRow][currentCol]) {
             handleCellClick(currentRow, currentCol);
           }
@@ -879,18 +686,13 @@ const drawGridSystem = () => {
       
       // 添加悬停效果
       cellContainer.addEventListener('mouseover', () => {
-        // 显示宫格边框（改为实线，保持可见）
         cellContainer.style.border = `${gridLineWidth.value}px solid #666666`;
         
         if (!cellImages.value[row][col]) {
-          // 没有图片时，显示上传提示悬停效果
           const cellCtx = cellCanvas.getContext('2d');
           if (cellCtx) {
-            // 绘制悬停背景
             cellCtx.fillStyle = 'rgba(220, 230, 255, 0.8)';
             cellCtx.fillRect(0, 0, cellWidth, cellHeight);
-            
-            // 绘制悬停文字
             cellCtx.fillStyle = '#3366ff';
             cellCtx.font = '14px Arial';
             cellCtx.textAlign = 'center';
@@ -898,7 +700,6 @@ const drawGridSystem = () => {
             cellCtx.fillText('点击上传图片', cellWidth / 2, cellHeight / 2);
           }
         } else {
-          // 有图片时，显示删除按钮
           const deleteBtn = cellContainer.querySelector('.delete-btn') as HTMLElement;
           if (deleteBtn) {
             deleteBtn.style.display = 'block';
@@ -1198,17 +999,13 @@ const handleCellClick = (row: number, col: number) => {
 const drawImageToCell = async (row: number, col: number, dataURL: string) => {
   const cleanDataURL = await loadComposedImageAsDataURL(dataURL);
 
-  // 如果图片无法访问（返回空字符串），则不导入
   if (!cleanDataURL) {
-    console.warn('图片无法访问，跳过导入');
     return;
   }
 
-  // 加载图片获取原始尺寸
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
-    // 计算宫格尺寸，用于确定图片的初始缩放比例
     const rows = props.gridConfig.rows;
     const cols = props.gridConfig.cols;
     const totalGapWidth = (cols - 1) * gridGap.value;
@@ -1218,19 +1015,11 @@ const drawImageToCell = async (row: number, col: number, dataURL: string) => {
     const cellWidth = (availableWidth - totalGapWidth) / cols;
     const cellHeight = (availableHeight - totalGapHeight) / rows;
 
-    // 计算初始缩放比例，确保图片完全显示在宫格内，不会超出
     const imgWidth = img.width;
     const imgHeight = img.height;
-
-    // 计算缩放比例，确保图片完全显示在宫格内，不会超出
-    // 使用Math.min确保图片的宽和高都不会超过宫格的宽和高
     const scaleFactor = Math.min(cellWidth / imgWidth, cellHeight / imgHeight);
-
-    // 限制最小缩放比例，确保图片不会太小
-    // 这里设置最小缩放比例为0.8，确保图片有合适的大小
     const initialScale = Math.max(0.8, scaleFactor);
 
-    // 获取当前宫格的图片状态，如果存在则保持原有状态，只更新dataURL和尺寸
     const currentState = cellImages.value[row]?.[col];
     const imageState = {
       dataURL: cleanDataURL,
@@ -1244,15 +1033,36 @@ const drawImageToCell = async (row: number, col: number, dataURL: string) => {
 
     setComposedImageState(row, col, imageState);
 
-    // 重新绘制宫格系统，确保图片正确显示，并且上传提示文字被隐藏
-    drawGridSystem();
+    const cellCanvas = cellCanvases[row]?.[col];
+    if (cellCanvas) {
+      const cellCtx = cellCanvas.getContext('2d');
+      if (cellCtx) {
+        cellCtx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
+        
+        const drawWidth = imageState.width * imageState.scale;
+        const drawHeight = imageState.height * imageState.scale;
+        const centerX = cellCanvas.width / 2;
+        const centerY = cellCanvas.height / 2;
 
-    // 滚动到画布容器顶部，确保图片可见
-    nextTick(() => {
-      if (gridCanvasContainer.value) {
-        gridCanvasContainer.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        cellCtx.save();
+        cellCtx.translate(centerX, centerY);
+        cellCtx.rotate(imageState.rotation * Math.PI / 180);
+        cellCtx.drawImage(
+          img,
+          -drawWidth / 2 + imageState.x,
+          -drawHeight / 2 + imageState.y,
+          drawWidth,
+          drawHeight
+        );
+        cellCtx.restore();
       }
-    });
+
+      // 为新导入的图片创建编辑容器和控制点
+      const cellContainer = cellCanvas.parentElement;
+      if (cellContainer && !cellContainer.querySelector('.edit-container')) {
+        setupCellInteraction(row, col, cellContainer, cellCanvas, cellWidth, cellHeight);
+      }
+    }
   };
   img.src = cleanDataURL;
 };
@@ -1265,31 +1075,20 @@ const drawImageWithState = (row: number, col: number, imageState: ImageState) =>
   const cellCtx = cellCanvas.getContext('2d');
   if (!cellCtx) return;
   
-  // 创建图片对象
   const img = new Image();
   img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    // 清除canvas
+  
+  const drawImage = () => {
     cellCtx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
 
-    // 直接使用imageState中保存的图片尺寸
     const drawWidth = imageState.width * imageState.scale;
     const drawHeight = imageState.height * imageState.scale;
-
-    // 计算居中位置
     const centerX = cellCanvas.width / 2;
     const centerY = cellCanvas.height / 2;
 
-    // 保存当前上下文状态
     cellCtx.save();
-
-    // 移动到画布中心
     cellCtx.translate(centerX, centerY);
-
-    // 应用旋转
     cellCtx.rotate(imageState.rotation * Math.PI / 180);
-
-    // 绘制图片，以中心为原点
     cellCtx.drawImage(
       img,
       -drawWidth / 2 + imageState.x,
@@ -1297,55 +1096,15 @@ const drawImageWithState = (row: number, col: number, imageState: ImageState) =>
       drawWidth,
       drawHeight
     );
-
-    // 恢复上下文状态
     cellCtx.restore();
   };
+  
+  if (imageState.dataURL.startsWith('data:')) {
+    img.onload = drawImage;
+  } else {
+    img.onload = drawImage;
+  }
   img.src = imageState.dataURL;
-};
-
-// 绘制上传提示文本和ICON
-const drawUploadHint = (row: number, col: number) => {
-  const cellCanvas = cellCanvases[row]?.[col];
-  if (!cellCanvas) return;
-  
-  const cellCtx = cellCanvas.getContext('2d');
-  if (!cellCtx) return;
-  
-  // 清除canvas
-  cellCtx.clearRect(0, 0, cellCanvas.width, cellCanvas.height);
-  
-  // 绘制上传提示背景
-  cellCtx.fillStyle = 'rgba(240, 240, 250, 0.6)';
-  cellCtx.fillRect(0, 0, cellCanvas.width, cellCanvas.height);
-  
-  // 绘制上传图标（加号）
-  const centerX = cellCanvas.width / 2;
-  const centerY = cellCanvas.height / 2 - 10;
-  const iconSize = 20;
-  
-  cellCtx.strokeStyle = '#999';
-  cellCtx.lineWidth = 2;
-  cellCtx.lineCap = 'round';
-  
-  // 横线
-  cellCtx.beginPath();
-  cellCtx.moveTo(centerX - iconSize / 2, centerY);
-  cellCtx.lineTo(centerX + iconSize / 2, centerY);
-  cellCtx.stroke();
-  
-  // 竖线
-  cellCtx.beginPath();
-  cellCtx.moveTo(centerX, centerY - iconSize / 2);
-  cellCtx.lineTo(centerX, centerY + iconSize / 2);
-  cellCtx.stroke();
-  
-  // 绘制提示文字
-  cellCtx.fillStyle = '#999';
-  cellCtx.font = '12px Arial';
-  cellCtx.textAlign = 'center';
-  cellCtx.textBaseline = 'middle';
-  cellCtx.fillText('点击上传', centerX, centerY + 20);
 };
 
 // 外部调用的绘制图片方法
@@ -1522,7 +1281,6 @@ const generateExportPreview = async () => {
               resolve();
             };
             img.onerror = () => {
-              console.warn(`图片加载失败，跳过该图片: ${savedImage.dataURL}`);
               resolve();
             };
             img.src = savedImage.dataURL;
@@ -1553,7 +1311,6 @@ const generateExportPreview = async () => {
     previewRecords.value.unshift(newRecord);
     
   } catch (error) {
-    console.error('生成导出预览失败:', error);
   }
 };
 

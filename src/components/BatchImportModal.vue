@@ -41,7 +41,7 @@
                 <div v-else class="img-placeholder">无预览</div>
               </div>
               <div class="gallery-name" :title="img.name">{{ img.name || '未命名' }}</div>
-              <div v-if="selectedIds.includes(img.id)" class="check-mark">✓</div>
+              <div v-if="selectedIds.includes(img.id)" class="check-mark">{{ selectedIds.indexOf(img.id) + 1 }}</div>
             </div>
           </div>
           <div v-else class="empty-gallery">图库中暂无图片</div>
@@ -77,8 +77,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import type { PreviewRecord } from '../types';
+import { ref, computed, inject } from 'vue';
+import type { PreviewRecord, ShowToastFunction } from '../types';
+
+const showToast = inject<ShowToastFunction>('showToast');
 
 const props = defineProps<{
   maxCount?: number;
@@ -122,6 +124,8 @@ const toggleSelect = (id: string) => {
     selectedIds.value.splice(index, 1);
   } else if (selectedIds.value.length < max) {
     selectedIds.value.push(id);
+  } else {
+    if (showToast) showToast(`最多只能选择 ${max} 张图片`, 'warning');
   }
 };
 

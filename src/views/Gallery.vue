@@ -125,9 +125,9 @@
             </td>
             <td class="col-index">{{ getRecordIndex(record.id) }}</td>
             <td class="col-preview">
-              <div class="preview-cell" @click="previewImage(record)">
-                <img v-if="record.dataURL && record.dataURL.startsWith('data:')" :src="record.dataURL" :alt="record.name" @error="handleImageError" />
-                <img v-else-if="record.sourceUrl" :src="record.sourceUrl" :alt="record.name" @error="handleImageError" />
+              <div class="preview-cell" @click="previewImage(record)" @wheel.stop>
+                <img v-if="record.dataURL && record.dataURL.startsWith('data:') && !failedImages.has(record.id)" :src="record.dataURL" :alt="record.name" @error="handleImageError(record.id)" />
+                <img v-else-if="record.sourceUrl && !failedImages.has(record.id)" :src="record.sourceUrl" :alt="record.name" @error="handleImageError(record.id)" />
                 <div v-else class="no-image">暂无</div>
                 <div class="preview-overlay">🔍</div>
               </div>
@@ -254,9 +254,25 @@
       </div>
     </div>
 
-    <div v-if="previewModal.show" class="preview-modal" @click="previewModal.show = false">
-      <img :src="previewModal.url" :alt="previewModal.name" class="preview-full-image" />
-      <button class="preview-close">×</button>
+    <div v-if="previewModal.show" class="preview-modal" @click="previewModal.show = false" @wheel="handlePreviewWheel">
+      <div 
+        class="preview-image-wrapper"
+        @mousedown="handlePreviewMouseDown"
+        @mousemove="handlePreviewMouseMove"
+        @mouseup="handlePreviewMouseUp"
+        @mouseleave="handlePreviewMouseLeave"
+      >
+        <img 
+          :src="previewModal.url" 
+          :alt="previewModal.name" 
+          class="preview-full-image" 
+          :style="{ transform: `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})` }"
+          @click.stop
+          @dragstart.prevent
+        />
+      </div>
+      <button class="preview-close" @click.stop="previewModal.show = false">×</button>
+      <div class="preview-zoom-indicator">{{ Math.round(previewZoom * 100) }}%</div>
     </div>
 
     <BatchImportModal
@@ -290,9 +306,16 @@ const currentPage = ref(1);
 const pageSize = ref(10);
 const loading = ref(false);
 const refreshingPreviews = ref(false);
+const failedImages = ref(new Set<string>());
 
 const editingRow = ref({ name: '', sourceUrl: '', tags: [] as string[], tagInput: '' });
 const previewModal = ref({ show: false, url: '', name: '' });
+const previewZoom = ref(1);
+const previewOffsetX = ref(0);
+const previewOffsetY = ref(0);
+const isDragging = ref(false);
+const dragStartX = ref(0);
+const dragStartY = ref(0);
 const showTagSelector = ref(false);
 const batchImportModalRef = ref<InstanceType<typeof BatchImportModal> | null>(null);
 
@@ -453,7 +476,6 @@ const refreshData = async () => {
       })));
     }
   } catch (error) {
-    console.error('刷新数据失败:', error);
     if (showToast) {
       showToast('刷新数据失败', 'error');
     }
@@ -484,12 +506,46 @@ const filterByTag = (tag: string) => {
 };
 
 const previewImage = (record: PreviewRecord) => {
+  previewZoom.value = 1;
+  previewOffsetX.value = 0;
+  previewOffsetY.value = 0;
   const imageUrl = (record.dataURL && record.dataURL.startsWith('data:'))
     ? record.dataURL
     : record.sourceUrl;
   if (imageUrl) {
     previewModal.value = { show: true, url: imageUrl, name: record.name || '' };
   }
+};
+
+const handlePreviewWheel = (e: WheelEvent) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  previewZoom.value = Math.max(0.1, Math.min(5, previewZoom.value + delta));
+};
+
+const handlePreviewMouseDown = (e: MouseEvent) => {
+  if (previewZoom.value <= 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  isDragging.value = true;
+  dragStartX.value = e.clientX - previewOffsetX.value;
+  dragStartY.value = e.clientY - previewOffsetY.value;
+};
+
+const handlePreviewMouseMove = (e: MouseEvent) => {
+  if (!isDragging.value || previewZoom.value <= 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  previewOffsetX.value = e.clientX - dragStartX.value;
+  previewOffsetY.value = e.clientY - dragStartY.value;
+};
+
+const handlePreviewMouseUp = () => {
+  isDragging.value = false;
+};
+
+const handlePreviewMouseLeave = () => {
+  isDragging.value = false;
 };
 
 const openBatchImportModal = () => {
@@ -516,7 +572,6 @@ const handleBatchImportConfirm = async (data: { urls: string }) => {
       });
       successCount++;
     } catch (error) {
-      console.error(`导入失败 ${url}:`, error);
       failCount++;
     }
   }
@@ -559,7 +614,6 @@ const addNewRow = async () => {
       showToast('已新增图片记录，请编辑', 'success');
     }
   } catch (error) {
-    console.error('添加记录失败:', error);
     if (showToast) {
       showToast('添加记录失败', 'error');
     }
@@ -608,7 +662,6 @@ const saveRow = async (id: string) => {
       showToast('保存成功', 'success');
     }
   } catch (error: any) {
-    console.error('保存失败:', error);
     if (error?.message?.includes('404')) {
       if (showToast) {
         showToast('保存失败：该记录不存在，请刷新页面重试', 'error');
@@ -638,7 +691,6 @@ const deleteRow = async (id: string) => {
         showToast('已删除图片记录', 'success');
       }
     } catch (error) {
-      console.error('删除失败:', error);
       if (showToast) {
         showToast('删除失败', 'error');
       }
@@ -663,7 +715,6 @@ const deleteSelected = async () => {
         showToast('已批量删除成功', 'success');
       }
     } catch (error) {
-      console.error('批量删除失败:', error);
       if (showToast) {
         showToast('批量删除失败', 'error');
       }
@@ -700,9 +751,8 @@ const toggleTagFromLibrary = (tag: string) => {
   }
 };
 
-const handleImageError = (e: Event) => {
-  const img = e.target as HTMLImageElement;
-  img.style.display = 'none';
+const handleImageError = (recordId: string) => {
+  failedImages.value.add(recordId);
 };
 
 const urlToDataURL = (url: string): Promise<string> => {
@@ -725,7 +775,7 @@ const urlToDataURL = (url: string): Promise<string> => {
         reject(new Error('图片转换失败'));
       }
     };
-    img.onerror = () => reject(new Error('图片加载失败，请检查URL是否可访问'));
+    img.onerror = () => reject(new Error('图片加载失败'));
     img.src = url;
   });
 };
@@ -769,7 +819,6 @@ const refreshSelectedPreviews = async () => {
       await api.updateGallery(id, { dataURL });
       successCount++;
     } catch (error) {
-      console.error(`转换图片失败 ${sourceUrl}:`, error);
       failCount++;
     }
   }
@@ -1298,6 +1347,7 @@ onMounted(() => {
   transition: opacity 0.2s;
   border-radius: 6px;
   font-size: 16px;
+  pointer-events: none;
 }
 
 .name-text {
@@ -1646,12 +1696,41 @@ onMounted(() => {
   to { opacity: 1; }
 }
 
+.preview-image-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.preview-image-wrapper:active {
+  cursor: grabbing;
+}
+
 .preview-full-image {
   max-width: 90%;
   max-height: 90%;
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s ease-out;
+  user-select: none;
+}
+
+.preview-zoom-indicator {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  pointer-events: none;
 }
 
 .batch-import-modal {

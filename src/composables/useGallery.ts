@@ -15,7 +15,6 @@ export function useGallery() {
       records.value = data
     } catch (e) {
       error.value = '加载数据失败'
-      console.error(e)
     } finally {
       loading.value = false
     }

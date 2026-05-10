@@ -49,7 +49,6 @@ export function useImageLoader() {
             resolve(url)
           }
         } catch (e) {
-          console.warn('图片转换失败:', e)
           resolve(url)
         } finally {
           loading.value = false
@@ -58,7 +57,6 @@ export function useImageLoader() {
 
       img.onerror = () => {
         error.value = '图片加载失败'
-        console.warn('图片加载失败:', url)
         resolve('')
         loading.value = false
       }

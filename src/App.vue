@@ -65,7 +65,6 @@ const loadData = async () => {
       timestamp: new Date(item.timestamp)
     }));
   } catch (error) {
-    console.error('加载数据失败:', error);
   }
 };
 
