@@ -67,6 +67,7 @@
         />
         <span>{{ gridMargin }}px</span>
       </label>
+      <button class="reset-canvas-btn" @click="clearAllCells" title="清空画布所有图片">🗑️ 重置画布</button>
     </div>
     
     <!-- 画布和宫格容器包裹层 -->
@@ -147,11 +148,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue';
 import { useGridConfig } from '../composables/useGridConfig';
 import { useImageProcessor, type ImageState } from '../composables/useImageProcessor';
 import { usePreviewRecords, type PreviewRecord as PreviewRecordType } from '../composables/usePreviewRecords';
 import { generateUniqueId } from '../utils';
+
+const documentListeners: Array<{ event: string; handler: EventListener }> = [];
+
+const addDocumentListener = (event: string, handler: EventListener) => {
+  document.addEventListener(event, handler);
+  documentListeners.push({ event, handler });
+};
+
+const removeAllDocumentListeners = () => {
+  documentListeners.forEach(({ event, handler }) => {
+    document.removeEventListener(event, handler);
+  });
+  documentListeners.length = 0;
+};
 
 const {
   gridLineWidth,
@@ -164,7 +179,8 @@ const {
   cellImages,
   loadImageAsDataURL: loadComposedImageAsDataURL,
   setImageState: setComposedImageState,
-  clearImageState: clearComposedImageState
+  clearImageState: clearComposedImageState,
+  clearAllImages: clearComposedAllImages
 } = useImageProcessor();
 
 const {
@@ -434,11 +450,12 @@ const setupCellInteraction = (row: number, col: number, cellContainer: HTMLEleme
       if (imageState) startScale = imageState.scale;
     });
     
-    document.addEventListener('mousemove', (e) => {
+    addDocumentListener('mousemove', (e) => {
       if (!isResizing) return;
+      const me = e as MouseEvent;
       const rect = cellContainer.getBoundingClientRect();
-      const currentX = e.clientX - rect.left;
-      const currentY = e.clientY - rect.top;
+      const currentX = me.clientX - rect.left;
+      const currentY = me.clientY - rect.top;
       const deltaX = Math.abs(currentX - cellCanvas.width / 2);
       const deltaY = Math.abs(currentY - cellCanvas.height / 2);
       const newScale = Math.max(0.1, Math.min(5, (deltaX + deltaY) / (cellCanvas.width + cellCanvas.height) * 4 * startScale));
@@ -450,7 +467,7 @@ const setupCellInteraction = (row: number, col: number, cellContainer: HTMLEleme
       }
     });
     
-    document.addEventListener('mouseup', () => { isResizing = false; });
+    addDocumentListener('mouseup', () => { isResizing = false; });
     editContainer.appendChild(controlPoint);
   });
   
@@ -479,12 +496,13 @@ const setupCellInteraction = (row: number, col: number, cellContainer: HTMLEleme
     startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
   });
   
-  document.addEventListener('mousemove', (e) => {
+  addDocumentListener('mousemove', (e) => {
     if (!isRotating) return;
+    const me = e as MouseEvent;
     const rect = cellContainer.getBoundingClientRect();
     const centerX = rect.left + cellCanvas.width / 2;
     const centerY = rect.top + cellCanvas.height / 2;
-    const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+    const currentAngle = Math.atan2(me.clientY - centerY, me.clientX - centerX);
     const deltaAngle = currentAngle - startAngle;
     const deltaDegrees = deltaAngle * (180 / Math.PI);
     const imageState = cellImages.value[currentRow][currentCol];
@@ -495,7 +513,7 @@ const setupCellInteraction = (row: number, col: number, cellContainer: HTMLEleme
     }
   });
   
-  document.addEventListener('mouseup', () => { isRotating = false; });
+  addDocumentListener('mouseup', () => { isRotating = false; });
   editContainer.appendChild(rotatePoint);
   
   let isDragging = false;
@@ -592,7 +610,8 @@ const setupCellInteraction = (row: number, col: number, cellContainer: HTMLEleme
 const drawGridSystem = () => {
   if (!ctx || !gridCanvasContainer.value) return;
   
-  // 清除旧的宫格canvas和删除按钮
+  removeAllDocumentListeners();
+  
   gridCanvasContainer.value.innerHTML = '';
   cellCanvases.length = 0;
   
@@ -877,32 +896,29 @@ const drawGridSystem = () => {
             }
           });
           
-          document.addEventListener('mousemove', (e) => {
+          addDocumentListener('mousemove', (e) => {
             if (!isResizing) return;
             
+            const me = e as MouseEvent;
             const rect = cellContainer.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
+            const currentX = me.clientX - rect.left;
+            const currentY = me.clientY - rect.top;
             
-            // 计算缩放比例
             const deltaX = Math.abs(currentX - cellCanvas.width / 2);
             const deltaY = Math.abs(currentY - cellCanvas.height / 2);
             const newScale = Math.max(0.1, Math.min(5, (deltaX + deltaY) / (cellCanvas.width + cellCanvas.height) * 4 * startScale));
             
-            // 更新图片缩放
             const imageState = cellImages.value[currentRow][currentCol];
             if (imageState) {
               imageState.scale = newScale;
               
-              // 重新绘制图片
               drawImageWithState(currentRow, currentCol, imageState);
               
-              // 更新所有编辑点位置
               updateControlPoints();
             }
           });
           
-          document.addEventListener('mouseup', () => {
+          addDocumentListener('mouseup', () => {
             isResizing = false;
           });
           
@@ -938,34 +954,31 @@ const drawGridSystem = () => {
           startAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
         });
         
-        document.addEventListener('mousemove', (e) => {
+        addDocumentListener('mousemove', (e) => {
           if (!isRotating) return;
           
+          const me = e as MouseEvent;
           const rect = cellContainer.getBoundingClientRect();
           const centerX = rect.left + cellCanvas.width / 2;
           const centerY = rect.top + cellCanvas.height / 2;
-          const mouseX = e.clientX;
-          const mouseY = e.clientY;
+          const mouseX = me.clientX;
+          const mouseY = me.clientY;
           const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
           
-          // 计算旋转角度差
           const deltaAngle = currentAngle - startAngle;
           const deltaDegrees = deltaAngle * (180 / Math.PI);
           
-          // 更新图片旋转
           const imageState = cellImages.value[currentRow][currentCol];
           if (imageState) {
             imageState.rotation = (imageState.rotation + deltaDegrees) % 360;
             
-            // 重新绘制图片
             drawImageWithState(currentRow, currentCol, imageState);
             
-            // 更新所有编辑点位置
             updateControlPoints();
           }
         });
         
-        document.addEventListener('mouseup', () => {
+        addDocumentListener('mouseup', () => {
           isRotating = false;
         });
         
@@ -1107,9 +1120,87 @@ const drawImageWithState = (row: number, col: number, imageState: ImageState) =>
   img.src = imageState.dataURL;
 };
 
+// 清空所有宫格图片
+const clearAllCells = () => {
+  clearComposedAllImages();
+  drawCanvasBackground();
+  drawGridSystem();
+};
+
+const exportCanvasData = async (format: 'jpg' | 'png', quality: 'original' | 'standard'): Promise<string | null> => {
+  try {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = props.canvasWidth;
+    tempCanvas.height = props.canvasHeight;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return null;
+
+    tempCtx.fillStyle = props.canvasBackgroundColor;
+    tempCtx.fillRect(0, 0, props.canvasWidth, props.canvasHeight);
+
+    const rows = props.gridConfig.rows;
+    const cols = props.gridConfig.cols;
+    const totalGapWidth = (cols - 1) * gridGap.value;
+    const totalGapHeight = (rows - 1) * gridGap.value;
+    const availableWidth = props.canvasWidth - 2 * gridMargin.value;
+    const availableHeight = props.canvasHeight - 2 * gridMargin.value;
+    const cellWidth = (availableWidth - totalGapWidth) / cols;
+    const cellHeight = (availableHeight - totalGapHeight) / rows;
+
+    const drawPromises: Promise<void>[] = [];
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const x = gridMargin.value + col * cellWidth + col * gridGap.value;
+        const y = gridMargin.value + row * cellHeight + row * gridGap.value;
+
+        const savedImage = cellImages.value[row]?.[col];
+        if (savedImage) {
+          const drawPromise = new Promise<void>((resolve) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              tempCtx.save();
+              tempCtx.beginPath();
+              tempCtx.rect(x, y, cellWidth, cellHeight);
+              tempCtx.clip();
+              tempCtx.translate(x + cellWidth / 2, y + cellHeight / 2);
+              tempCtx.rotate(savedImage.rotation * Math.PI / 180);
+              const drawWidth = savedImage.width * savedImage.scale;
+              const drawHeight = savedImage.height * savedImage.scale;
+              tempCtx.drawImage(
+                img,
+                -drawWidth / 2 + savedImage.x,
+                -drawHeight / 2 + savedImage.y,
+                drawWidth,
+                drawHeight
+              );
+              tempCtx.restore();
+              resolve();
+            };
+            img.onerror = () => resolve();
+            img.src = savedImage.dataURL;
+          });
+          drawPromises.push(drawPromise);
+        }
+      }
+    }
+
+    await Promise.all(drawPromises);
+
+    const qualityValue = quality === 'original' ? 1.0 : 0.7;
+    return tempCanvas.toDataURL(`image/${format}`, qualityValue);
+  } catch (error) {
+    return null;
+  }
+};
+
 // 外部调用的绘制图片方法
 defineExpose({
   drawImageToCell,
+  clearAllCells,
+  drawGridSystem,
+  exportCanvasData,
   get previewRecords() {
     return previewRecords.value;
   }
@@ -1377,6 +1468,10 @@ onMounted(() => {
     }
   });
 });
+
+onUnmounted(() => {
+  removeAllDocumentListeners();
+});
 </script>
 
 <style scoped>
@@ -1463,6 +1558,23 @@ canvas {
 
 .canvas-settings input[type="checkbox"] {
   cursor: pointer;
+}
+
+.reset-canvas-btn {
+  padding: 4px 10px;
+  background: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.reset-canvas-btn:hover {
+  background: #ff7875;
 }
 
 /* 画布底部 */

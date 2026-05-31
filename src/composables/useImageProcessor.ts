@@ -39,7 +39,30 @@ export function useImageProcessor() {
         }
       }
       img.onerror = () => {
-        resolve('')
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+        const proxyUrl = `${apiBaseUrl}/proxy-image?url=${encodeURIComponent(url)}`
+        const proxyImg = new Image()
+        proxyImg.crossOrigin = 'anonymous'
+        proxyImg.onload = () => {
+          try {
+            const canvas = document.createElement('canvas')
+            canvas.width = proxyImg.width
+            canvas.height = proxyImg.height
+            const ctx = canvas.getContext('2d')
+            if (ctx) {
+              ctx.drawImage(proxyImg, 0, 0)
+              resolve(canvas.toDataURL('image/jpeg', 0.95))
+            } else {
+              resolve(proxyUrl)
+            }
+          } catch (e) {
+            resolve(proxyUrl)
+          }
+        }
+        proxyImg.onerror = () => {
+          resolve('')
+        }
+        proxyImg.src = proxyUrl
       }
       img.src = url
     })

@@ -378,6 +378,9 @@ const drawImageToCellCanvas = (row: number, col: number, dataURL: string) => {
 
 // 绘制网格 - 调用 CanvasContainer 组件中的宫格系统
 const drawGrid = () => {
+  if (canvasContainerRef.value?.drawGridSystem) {
+    canvasContainerRef.value.drawGridSystem();
+  }
 };
 
 // 选择模板
@@ -815,66 +818,16 @@ const toggleGrid = (show: boolean) => {
 
 
 // 导出画布
-const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') => {
-  // 获取CanvasContainer组件的DOM元素
-  const canvasContainer = document.querySelector('.canvas-container');
-  if (!canvasContainer) return;
-  
-  // 获取主canvas元素
-  const mainCanvas = canvasContainer.querySelector('canvas');
-  if (!mainCanvas) return;
+const exportCanvas = async (format: 'jpg' | 'png', quality: 'original' | 'standard') => {
+  if (!canvasContainerRef.value) return;
 
   try {
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = mainCanvas.width;
-    tempCanvas.height = mainCanvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) throw new Error('无法获取临时画布上下文');
-    
-    // 2. 复制主canvas的背景色
-    tempCtx.fillStyle = canvasBackgroundColor.value;
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    
-    // 3. 获取CanvasContainer组件实例，以便访问cellImages数组
-    // 注意：这里需要确保canvasContainerRef已经正确引用了CanvasContainer组件
-    if (canvasContainerRef.value) {
-      // 计算宫格尺寸，用于确定每个宫格的位置
-      const gridConfig = currentGridConfig.value;
-      const rows = gridConfig.rows;
-      const cols = gridConfig.cols;
-      const totalGapWidth = (cols - 1) * gridGap.value;
-      const totalGapHeight = (rows - 1) * gridGap.value;
-      const availableWidth = mainCanvas.width - 2 * gridMargin.value;
-      const availableHeight = mainCanvas.height - 2 * gridMargin.value;
-      const cellWidth = (availableWidth - totalGapWidth) / cols;
-      const cellHeight = (availableHeight - totalGapHeight) / rows;
-      
-      // 4. 遍历所有宫格，只绘制有图片的宫格
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          // 检查宫格中是否有图片
-          // 注意：这里假设cellImages数组是CanvasContainer组件的一个属性
-          // 实际实现中，可能需要通过事件或props将cellImages传递给父组件
-          // 由于当前无法直接访问CanvasContainer组件的cellImages数组
-          // 我们采用另一种方法：直接绘制宫格canvas，但确保只绘制有图片的宫格
-          const cellCanvas = document.getElementById(`cell-canvas-${row}-${col}`) as HTMLCanvasElement;
-          if (cellCanvas) {
-            // 获取宫格canvas的位置
-            const x = gridMargin.value + col * cellWidth + col * gridGap.value;
-            const y = gridMargin.value + row * cellHeight + row * gridGap.value;
-            
-            // 绘制宫格canvas到临时画布
-            tempCtx.drawImage(cellCanvas, x, y, cellWidth, cellHeight);
-          }
-        }
-      }
+    const dataURL = await canvasContainerRef.value.exportCanvasData(format, quality);
+    if (!dataURL) {
+      if (showToast) showToast('导出画布时出错，请重试', 'error');
+      return;
     }
-    
-    // 5. 导出画布内容
-    const qualityValue = quality === 'original' ? 1.0 : 0.7;
-    const dataURL = tempCanvas.toDataURL(`image/${format}`, qualityValue);
-    
-    // 6. 转换为Blob并下载
+
     fetch(dataURL)
       .then(res => res.blob())
       .then(blob => {
@@ -892,7 +845,6 @@ const exportCanvas = (format: 'jpg' | 'png', quality: 'original' | 'standard') =
           showToast('下载文件时出错，请重试', 'error');
         }
       });
-    
   } catch (error) {
     if (showToast) {
       showToast('导出画布时出错，请重试', 'error');

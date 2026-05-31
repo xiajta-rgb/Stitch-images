@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, send_from_directory
+import requests
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import json
 import os
@@ -6,6 +7,21 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
+
+# 获取远程图片
+@app.route('/api/proxy-image', methods=['GET'])
+def proxy_image():
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'error': 'URL is required'}), 400
+    
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return Response(response.content, mimetype=response.headers.get('Content-Type', 'image/jpeg'))
+        return jsonify({'error': 'Failed to fetch image'}), response.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # 配置 - 使用绝对路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
